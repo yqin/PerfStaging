@@ -34,6 +34,7 @@ DEBUG=0
 ENV_VARS=""
 INPUT=""
 JOB=""
+LOG=""
 MODE=""
 MODULES=""
 MPIS=("HPCX")
@@ -57,18 +58,18 @@ function Error () {
 }
 
 
-# Print warning message
-function Warning () {
-    local MSG="$@"
-    echo "`date +"%b %d %H:%M:%S"` WARNING: "$MSG"" >&2
-}
-
-
 # Print info message
 function Info () {
     local MSG="$@"
+    echo "`date +"%b %d %H:%M:%S"` INFO: "$MSG"" >&2
+}
+
+
+# Print verbose message
+function Verbose () {
+    local MSG="$@"
     if [[ ${VERBOSE} == 1 ]]; then
-        echo "`date +"%b %d %H:%M:%S"` INFO: "$MSG"" >&2
+        echo "`date +"%b %d %H:%M:%S"` VERBOSE: "$MSG"" >&2
     fi  
 }
 
@@ -118,14 +119,14 @@ function UtoL () {
 function LoadModule () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local MODULE="$1"
+    local MODULE="$@"
 
     if [[ -n "${MODULE}" ]]; then
         cat >> "${JOB}" << EOF
 module load ${MODULE}
 EOF
 
-        Info "Module \"${MODULE}\" loaded."
+        Verbose "Module \"${MODULE}\" loaded."
     fi
 }
 
@@ -152,7 +153,7 @@ function Sanitize () {
 }
 
 
-# Setup compiler
+# Load compiler module
 function LoadCompiler () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
@@ -174,11 +175,11 @@ function LoadCompiler () {
         LoadModule "`UtoL ${COMPILER}`/${COMPILER_VER}"
     fi
 
-    Info "Compiler ${COMPILER}/${COMPILER_VER} loaded."
+    Verbose "Compiler ${COMPILER}/${COMPILER_VER} loaded."
 }
 
 
-# Setup MPI
+# Load MPI module
 function LoadMPI () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
@@ -190,36 +191,41 @@ function LoadMPI () {
     if [[ "${MPI}" == "HPCX" ]]; then
 
         if [[ "${COMPILER}" == "INTEL" ]]; then
-
             local SUFFIX=`echo ${COMPILER_VER} | awk -F. '{print $1}'`
             LoadModule "`UtoL ${MPI}`-${MPI_VER}/icc-${SUFFIX}" 
-
         elif [[ "${COMPILER}" == "GNU" ]]; then
-
             LoadModule "`UtoL ${MPI}`-${MPI_VER}/gcc"
-
         else
-
             LoadModule "`UtoL ${MPI}`-${MPI_VER}"
-
         fi
 
     elif [[ "${MPI}" == "IMPI" ]]; then
-
         LoadModule "intel/`UtoL ${MPI}`/${MPI_VER}"
-
     else
-
         LoadModule "`UtoL ${MPI}`-${MPI_VER}"
-
     fi
 
-    Info "MPI ${MPI}/${MPI_VER} loaded."
+    Verbose "MPI ${MPI}/${MPI_VER} loaded."
 }
 
 
-# Setup extra environment variables
-function LoadEnvironment () {
+# Load application module
+function LoadApp () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local COMPILER="$1"
+    local COMPILER_VER="$2"
+    local MPI="$3"
+    local MPI_VER="$4"
+
+    LoadModule "`UtoL ${APP}`/${APP_VER}-`UtoL ${MPI}`-${MPI_VER}-`UtoL ${COMPILER}`-${COMPILER_VER}"
+
+    Verbose "APP ${APP}/${APP_VER} loaded."
+}
+
+
+# Export extra environment variables
+function ExportEnvironment () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     if [[ -n ${ENV_VARS} ]]; then
@@ -227,7 +233,7 @@ function LoadEnvironment () {
 export ${ENV_VARS}
 EOF
 
-        Info "Environment variables ${ENV_VARS} exported."
+        Verbose "Environment variables ${ENV_VARS} exported."
     fi
 }
 
@@ -256,7 +262,7 @@ function BuildJob () {
     for COMPILER in ${COMPILERS[@]}; do
 
         if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
-            Warning "${COMPILER} is not a valid compiler, pass ..."
+            Info "${COMPILER} is not a valid compiler, pass ..."
             continue
         fi
 
@@ -264,14 +270,14 @@ function BuildJob () {
 
             local TEMP="VAL_${COMPILER}_VERS[@]"
             if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
-                Warning "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
+                Info "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
                 continue
             fi
 
             for MPI in ${MPIS[@]}; do
 
                 if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
-                    Warning "${MPI} is not a valid MPI, pass ..."
+                    Info "${MPI} is not a valid MPI, pass ..."
                     continue
                 fi
 
@@ -279,7 +285,7 @@ function BuildJob () {
 
                     local TEMP="VAL_${MPI}_VERS[@]"
                     if ! IsValid "${MPI_VER}" "${!TEMP}"; then
-                        Warning "${MPI_VER} is not a valid version for ${MPI}, pass ..."
+                        Info "${MPI_VER} is not a valid version for ${MPI}, pass ..."
                         continue
                     fi
 
@@ -291,18 +297,33 @@ function BuildJob () {
 
                                 # Define job script name
                                 JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.`printf \"%04d\" $((NODE * PPN * THREAD))`"
+                                LOG="${JOB}.log"
 
-                                # Shell to be used
+                                # Job script header
                                 cat > "${JOB}" << EOF
 #!${SHELL}
 module purge
 EOF
 
+                                # Load compiler
                                 LoadCompiler "${COMPILER}" "${COMPILER_VER}"
+
+                                # Load MPI
                                 LoadMPI "${COMPILER}" "${COMPILER_VER}" "${MPI}" "${MPI_VER}"
+
+                                # Load application module
+                                LoadApp "${COMPILER}" "${COMPILER_VER}" "${MPI}" "${MPI_VER}"
+
+                                # Load extra modules
                                 LoadModule "${MODULES}"
-                                LoadEnvironment
+
+                                # Load extra environment variables
+                                ExportEnvironment
+
+                                # Show job script
                                 ShowJob
+
+                                # Submit job
                                 SubmitJob
 
                             done # THREAD
@@ -616,5 +637,5 @@ done
 # Sanity checking
 Sanitize
 
-# Run
+# Build and run jobs
 BuildJob
