@@ -1,20 +1,34 @@
 #!/bin/bash
 
+# GLOBAL settings
+AUTHOR="Yong Qin (yongq@mellanox.com)"
+VERSION="0.1"
+
+
 # ERROR Codes
 # 1 - command line option error
 # 2 - not an integer
 EOPTARG=1
 EINTEGER=2
 
-# GLOBAL settings
-AUTHOR="Yong Qin (yongq@mellanox.com)"
-VERSION="0.1"
 
+# Valid options
+# Compilers
+VAL_COMPILERS=("GNU" "INTEL")
+VAL_GNU_VERS=("4.4.7")
+VAL_INTEL_VERS=("2017.4.196")
+# MPIs
+VAL_MPIS=("HPCX" "IMPI")
+VAL_HPCX_VERS=("1.9")
+VAL_IMPI_VERS=("2017.3.196")
+
+
+# Default values
 APP="OSU"
 APP_VER="5.3.2"
 BENCHMARK="osu_latency"
 CLUSTER="DDDD"
-COMPILERS=("intel")
+COMPILERS=("INTEL")
 COMPILER_VERS=("2017.4.196")
 DEBUG=0
 ENV_VARS=""
@@ -22,7 +36,7 @@ INPUT=""
 JOB=""
 MODE=""
 MODULES=""
-MPIS=("hpcx")
+MPIS=("HPCX")
 MPI_VERS=("1.9")
 MPI_OPTS=("")
 MPI_CMD="mpirun"
@@ -36,7 +50,8 @@ VERBOSE=0
 # Print error message
 function Error () {
     local EXIT="$1"
-    local MSG="$2"
+    shift
+    local MSG="$@"
     echo "`date +"%b %d %H:%M:%S"` ERROR: "$MSG"" >&2
     exit $EXIT
 }
@@ -44,14 +59,14 @@ function Error () {
 
 # Print warning message
 function Warning () {
-    local MSG="$1"
+    local MSG="$@"
     echo "`date +"%b %d %H:%M:%S"` WARNING: "$MSG"" >&2
 }
 
 
 # Print info message
 function Info () {
-    local MSG="$1"
+    local MSG="$@"
     if [[ ${VERBOSE} == 1 ]]; then
         echo "`date +"%b %d %H:%M:%S"` INFO: "$MSG"" >&2
     fi  
@@ -60,7 +75,7 @@ function Info () {
 
 # Print debug message
 function Debug () {
-    local MSG="$1"
+    local MSG="$@"
     if [[ ${DEBUG} == 1 ]]; then
         echo "`date +"%b %d %H:%M:%S"` DEBUG: "$MSG"" >&2
     fi  
@@ -74,25 +89,50 @@ function IsNumber () {
 }
 
 
-# Load modules and exit if fail
-function LoadModule () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+# Validate if an element in array or not
+function IsValid () {
+    local e match="$1"
+    shift
 
-    local MODULE=$1
+    for e; do
+        [[ "$e" == "$match" ]] && return 0
+    done
+
+    return 1
+}
+
+
+# Convert lowercase to uppercase
+function LtoU () {
+    echo "$@" | tr a-z A-Z
+}
+
+
+# Convert uppercase to lowercase
+function UtoL () {
+    echo "$@" | tr A-Z a-z
+}
+
+
+# Load module(s)
+function LoadModule () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local MODULE="$1"
 
     if [[ -n "${MODULE}" ]]; then
         cat >> "${JOB}" << EOF
 module load ${MODULE}
 EOF
 
-        Info "Module ${MODULE} loaded."
+        Info "Module \"${MODULE}\" loaded."
     fi
 }
 
 
 # Sanity checking to make sure all required information is provided
 function Sanitize () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
     if [[ -z "${APP}" ]]; then
         Error ${EOPTARG} "Application not provided."
@@ -114,19 +154,24 @@ function Sanitize () {
 
 # Setup compiler
 function LoadCompiler () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local COMPILER=$1
-    local COMPILER_VER=$2
+    local COMPILER="$1"
+    local COMPILER_VER="$2"
 
-    if [[ "${COMPILER}" == "intel" ]]; then
-        LoadModule "${COMPILER}/compiler/${COMPILER_VER}"
-    elif [[ "${COMPILER}" == "gnu" ]]; then
-        if [[ "${COMPILER_VER}" != `gcc -v 2>&1 | awk 'END{print $3}'` ]]; then
-            LoadModule "${COMPILER}/${COMPILER_VER}"
+    if [[ "${COMPILER}" == "GNU" ]]; then
+
+        # No need to load module if system GCC is used
+        if [[ "${COMPILER_VER}" == `gcc -v 2>&1 | awk 'END{print $3}'` ]]; then
+            return
         fi
+
+    fi
+
+    if [[ "${COMPILER}" == "INTEL" ]]; then
+        LoadModule "`UtoL ${COMPILER}`/compiler/${COMPILER_VER}"
     else
-        Error ${EOPTARG} "Unknown compiler ${COMPILER}/${COMPILER_VER}."
+        LoadModule "`UtoL ${COMPILER}`/${COMPILER_VER}"
     fi
 
     Info "Compiler ${COMPILER}/${COMPILER_VER} loaded."
@@ -135,50 +180,47 @@ function LoadCompiler () {
 
 # Setup MPI
 function LoadMPI () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local MPI=$1
-    local MPI_VER=$2
+    local COMPILER="$1"
+    local COMPILER_VER="$2"
+    local MPI="$3"
+    local MPI_VER="$4"
 
-    if [[ "${MPI}" == "hpcx" ]]; then
-        if [[ "${COMPILER}" == "intel" ]]; then
-            if [[ "${COMPILER_VER}" == "2017"* ]]; then
-                LoadModule "${MPI}-${MPI_VER}/icc-2017"
-            elif [[ "${COMPILER_VER}" == "2016"* ]]; then
-                LoadModule "${MPI}-${MPI_VER}/icc-2016"
-            else
-                Error ${EOPTARG} "Unknown MPI ${MPI}-${MPI_VER}/icc-${COMPILER_VER}."
-            fi
-        elif [[ "${COMPILER}" == "gnu" ]]; then
-            LoadModule "${MPI}-${MPI_VER}/gcc"
+    if [[ "${MPI}" == "HPCX" ]]; then
+
+        if [[ "${COMPILER}" == "INTEL" ]]; then
+
+            local SUFFIX=`echo ${COMPILER_VER} | awk -F. '{print $1}'`
+            LoadModule "`UtoL ${MPI}`-${MPI_VER}/icc-${SUFFIX}" 
+
+        elif [[ "${COMPILER}" == "GNU" ]]; then
+
+            LoadModule "`UtoL ${MPI}`-${MPI_VER}/gcc"
+
         else
-            Error ${EOPTARG} "Unknown MPI ${MPI}-${MPI_VER}/${COMPILER}-${COMPILER_VER}."
+
+            LoadModule "`UtoL ${MPI}`-${MPI_VER}"
+
         fi
-    elif [[ "${MPI}" == "impi" ]]; then
-        LoadModule "intel/${MPI}/${MPI_VER}"
+
+    elif [[ "${MPI}" == "IMPI" ]]; then
+
+        LoadModule "intel/`UtoL ${MPI}`/${MPI_VER}"
+
     else
-        Error ${EOPTARG} "Unknown MPI ${MPI}-${MPI_VER}."
+
+        LoadModule "`UtoL ${MPI}`-${MPI_VER}"
+
     fi
 
     Info "MPI ${MPI}/${MPI_VER} loaded."
 }
 
 
-# Load extra modules
-function LoadModules () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
-
-    if [[ -n "${MODULES}" ]]; then
-        LoadModule "${MODULES}"
-    fi
-
-    #Debug "All loaded modules: `module -t list 2>&1 | awk 'NR>=2{print $1}'`"
-}
-
-
 # Setup extra environment variables
 function LoadEnvironment () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
     if [[ -n ${ENV_VARS} ]]; then
         cat >> "${JOB}" << EOF
@@ -187,14 +229,12 @@ EOF
 
         Info "Environment variables ${ENV_VARS} exported."
     fi
-
-    #Debug "All environment variables: `env`"
 }
 
 
 # Build MPIRUN command line
 function BuildMPI_CMD () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
     echo
 }
@@ -202,7 +242,7 @@ function BuildMPI_CMD () {
 
 # Build job script
 function BuildJob () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
     local COMPILER=""
     local COMPILER_VER=""
@@ -212,20 +252,42 @@ function BuildJob () {
     local PPN=
     local THREAD=
 
-    # Permutate all combinations
-    for COMPILER in ${COMPILERS[*]}; do
+    # Permutate all valid combinations
+    for COMPILER in ${COMPILERS[@]}; do
 
-        for COMPILER_VER in ${COMPILER_VERS[*]}; do
+        if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
+            Warning "${COMPILER} is not a valid compiler, pass ..."
+            continue
+        fi
 
-            for MPI in ${MPIS[*]}; do
+        for COMPILER_VER in ${COMPILER_VERS[@]}; do
 
-                for MPI_VER in ${MPI_VERS[*]}; do
+            local TEMP="VAL_${COMPILER}_VERS[@]"
+            if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
+                Warning "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
+                continue
+            fi
 
-                    for NODE in ${NODES[*]}; do
+            for MPI in ${MPIS[@]}; do
 
-                        for PPN in ${PPNS[*]}; do
+                if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
+                    Warning "${MPI} is not a valid MPI, pass ..."
+                    continue
+                fi
 
-                            for THREAD in ${THREADS[*]}; do
+                for MPI_VER in ${MPI_VERS[@]}; do
+
+                    local TEMP="VAL_${MPI}_VERS[@]"
+                    if ! IsValid "${MPI_VER}" "${!TEMP}"; then
+                        Warning "${MPI_VER} is not a valid version for ${MPI}, pass ..."
+                        continue
+                    fi
+
+                    for NODE in ${NODES[@]}; do
+
+                        for PPN in ${PPNS[@]}; do
+
+                            for THREAD in ${THREADS[@]}; do
 
                                 # Define job script name
                                 JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.`printf \"%04d\" $((NODE * PPN * THREAD))`"
@@ -237,10 +299,11 @@ module purge
 EOF
 
                                 LoadCompiler "${COMPILER}" "${COMPILER_VER}"
-                                LoadMPI "${MPI}" "${MPI_VER}"
-                                LoadModules
+                                LoadMPI "${COMPILER}" "${COMPILER_VER}" "${MPI}" "${MPI_VER}"
+                                LoadModule "${MODULES}"
                                 LoadEnvironment
                                 ShowJob
+                                SubmitJob
 
                             done # THREAD
 
@@ -260,7 +323,7 @@ EOF
 
 # Show job script
 function ShowJob () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 
     local LINE
 
@@ -272,7 +335,7 @@ function ShowJob () {
 
 # Submit job script
 function SubmitJob () {
-    Debug "Calling ${FUNCNAME[0]}($*)"
+    Debug "Calling ${FUNCNAME[0]}($@)"
 }
 
 
@@ -367,8 +430,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    COMPILER=(${2//,/ })
-                    Debug "COMPILERS=(${COMPILERS[*]})"
+                    COMPILERS=(`LtoU ${2//,/ }`)
+                    Debug "COMPILERS=(${COMPILERS[@]})"
                     shift 2
                     ;;
             esac
@@ -379,8 +442,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    COMPILER_VER=(${2//,/ })
-                    Debug "COMPILER_VERS=(${COMPILER_VERS[*]})"
+                    COMPILER_VERS=(${2//,/ })
+                    Debug "COMPILER_VERS=(${COMPILER_VERS[@]})"
                     shift 2
                     ;;
             esac
@@ -461,8 +524,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    MPIS=(${2//,/ })
-                    Debug "MPIS=(${MPIS[*]})"
+                    MPIS=(`LtoU ${2//,/ }`)
+                    Debug "MPIS=(${MPIS[@]})"
                     shift 2
                     ;;
             esac
@@ -473,8 +536,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    MPI_VER=(${2//,/ })
-                    Debug "MPI_VERS=(${MPI_VERS[*]})"
+                    MPI_VERS=(${2//,/ })
+                    Debug "MPI_VERS=(${MPI_VERS[@]})"
                     shift 2
                     ;;
             esac
@@ -555,4 +618,3 @@ Sanitize
 
 # Run
 BuildJob
-SubmitJob
