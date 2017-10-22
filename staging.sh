@@ -238,11 +238,43 @@ EOF
 }
 
 
+# Prepare job script header
+function PrepareJobHead () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    cat > "${JOB}" << EOF
+#!${SHELL}
+module purge
+EOF
+}
+
+
+# Prepare job script body
+function PrepareJobBody () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    cat >> "${JOB}" << EOF
+
+echo "DATE=\`date +%Y-%m-%dT%H:%M:%S\`"
+echo "CLUSTER=${CLUSTER}"
+echo "OS=\`cat /etc/redhat-release\`"
+echo "KERNEL=\`uname -r\`"
+echo "OFED=\`ofed_info|awk 'NR==1{print $1}'\`"
+echo "APP=${APP}"
+echo "APP_VERSION=${APP_VER}"
+echo "BENCHMARK=${BENCHMARK}"
+echo "MPI=${MPI}"
+echo "MPI_VERSION=${MPI_VER}"
+echo "COMPILER=${COMPILER}"
+echo "COMPILER_VERSION=${COMPILER_VER}"
+echo "MPIRUN_CMD=${MPI_CMD}"
+EOF
+}
+
+
 # Build MPIRUN command line
 function BuildMPI_CMD () {
     Debug "Calling ${FUNCNAME[0]}($@)"
-
-    echo
 }
 
 
@@ -289,6 +321,7 @@ function BuildJob () {
                         continue
                     fi
 
+                    # TODO: Move these to outer loops
                     for NODE in ${NODES[@]}; do
 
                         for PPN in ${PPNS[@]}; do
@@ -299,11 +332,8 @@ function BuildJob () {
                                 JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.`printf \"%04d\" $((NODE * PPN * THREAD))`"
                                 LOG="${JOB}.log"
 
-                                # Job script header
-                                cat > "${JOB}" << EOF
-#!${SHELL}
-module purge
-EOF
+                                # Prepare job script header
+                                PrepareJobHead
 
                                 # Load compiler
                                 LoadCompiler "${COMPILER}" "${COMPILER_VER}"
@@ -319,6 +349,9 @@ EOF
 
                                 # Load extra environment variables
                                 ExportEnvironment
+
+                                # Prepare job script body
+                                PrepareJobBody
 
                                 # Show job script
                                 ShowJob
