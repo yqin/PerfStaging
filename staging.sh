@@ -15,20 +15,21 @@ EINTEGER=2
 # Valid options
 # Compilers
 VAL_COMPILERS=("gnu" "intel")
-VAL_GNU_VERS=("4.4.7")
+VAL_GNU_VERS=("4.4.7" "4.8.5" "4.9.3" "5.4.0")
 VAL_INTEL_VERS=("2017.4.196")
 # MPIs
 VAL_MPIS=("hpcx" "impi")
-VAL_HPCX_VERS=("1.9")
+VAL_HPCX_VERS=("1.9" "2.0")
 VAL_IMPI_VERS=("2017.3.196")
 # MODES (PML or FABRIC)
 VAL_HPCX_MODES=("ob1" "ucx" "yalla")
 VAL_IMPI_MODES=("dapl" "ofa")
 # TLS
 VAL_OB1_TLS=("openib")
-VAL_UCX_TLS=("rc" "rc_x" "ud_x" "dc_x")
-VAL_YALLA_TLS=("rc" "ud")
-VAL_DAPL_TLS=("ud")
+VAL_UCX_TLS=("dc_x" "rc" "rc_x" "ud_x")
+VAL_YALLA_TLS=("dc" "rc" "ud")
+VAL_DAPL_TLS=("impi")
+VAL_OFA_TLS=("impi")
 
 
 # Default values
@@ -49,10 +50,11 @@ MODULES=""
 MPIS=("hpcx")
 MPI_VERS=("1.9")
 MPI_OPTS=""
-MPI_CMD="mpirun"
+MPIRUN="mpirun"
 NODES=(1)
 PPNS=(1)
 PORT="1"
+SBATCH="sbatch"
 SHARP=0
 THREADS=(1)
 TLS=("openib")
@@ -138,7 +140,7 @@ function LoadModule () {
 module load ${MODULE}
 EOF
 
-        Verbose "Module \"${MODULE}\" loaded."
+        Verbose "Loaded module \"${MODULE}\""
     fi
 }
 
@@ -184,7 +186,7 @@ function LoadCompiler () {
         LoadModule "${COMPILER}/${COMPILER_VER}"
     fi
 
-    Verbose "Compiler ${COMPILER}/${COMPILER_VER} loaded."
+    Verbose "Loaded compiler \"${COMPILER}/${COMPILER_VER}\""
 }
 
 
@@ -209,7 +211,7 @@ function LoadMPI () {
         LoadModule "${MPI}-${MPI_VER}"
     fi
 
-    Verbose "MPI ${MPI}/${MPI_VER} loaded."
+    Verbose "Loaded MPI \"${MPI}/${MPI_VER}\""
 }
 
 
@@ -219,7 +221,7 @@ function LoadApp () {
 
     LoadModule "`UtoL ${APP}`/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}"
 
-    Verbose "APP ${APP}/${APP_VER} loaded."
+    Verbose "Loaded APP \"${APP}/${APP_VER}\""
 }
 
 
@@ -227,12 +229,16 @@ function LoadApp () {
 function LoadEnvironment () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
+    cat >> "${JOB}" << EOF
+export OMP_NUM_THREADS=${THREAD}
+EOF
+
     if [[ -n ${ENV_VARS} ]]; then
         cat >> "${JOB}" << EOF
 export ${ENV_VARS}
 EOF
 
-        Verbose "Environment variables ${ENV_VARS} exported."
+        Verbose "Exported environment variables \"${ENV_VARS}\""
     fi
 }
 
@@ -258,10 +264,14 @@ echo "DATE=\`date "+%F %T"\`"
 echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
 echo "KERNEL=\`uname -r\`"
-echo "OFED=\`ofed_info|awk 'NR==1{print $1}'\`"
+echo "OFED=\`ofed_info|awk 'NR==1{print \$1}'\`"
 echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
+echo "INPUT=${INPUT}"
+echo "NODES=${NODE}"
+echo "PPN=${PPN}"
+echo "THREADS=${THREAD}"
 echo "DEVICE=${DEVICE}"
 echo "PORT=${PORT}"
 echo "COMPILER=${COMPILER}"
@@ -277,9 +287,13 @@ EOF
 
     cat >> "${JOB}" << EOF
 echo "MPIRUN_CMD=${MPI_CMD}"
+echo
+echo
 
 ${MPI_CMD}
 EOF
+
+    Info "Built ${JOB}"
 }
 
 
@@ -370,72 +384,91 @@ function BuildMPI_CMD () {
 function BuildJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
+    local NODE=
+    local PPN=
+    local THREAD=
     local COMPILER=""
     local COMPILER_VER=""
     local MPI=""
     local MPI_VER=""
     local MODE=""
     local TL=""
-    local NODE=
-    local PPN=
-    local THREAD=
 
     # Permutate all valid combinations
     for NODE in ${NODES[@]}; do
 
+        Debug "NODE=${NODE}"
+
         for PPN in ${PPNS[@]}; do
+
+            Debug "PPN=${PPN}"
 
             for THREAD in ${THREADS[@]}; do
 
+                Debug "THREAD=${THREAD}"
+
                 for COMPILER in ${COMPILERS[@]}; do
 
+                    Debug "COMPILER=${COMPILER}"
+
                     if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
-                        Info "${COMPILER} is not a valid compiler, pass ..."
+                        Verbose "${COMPILER} is not a valid compiler, pass"
                         continue
                     fi
 
                     for COMPILER_VER in ${COMPILER_VERS[@]}; do
 
+                        Debug "COMPILER_VER=${COMPILER_VER}"
+
                         local TEMP="VAL_`LtoU ${COMPILER}`_VERS[@]"
                         if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
-                            Info "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
+                            Verbose "${COMPILER_VER} is not a valid version for ${COMPILER}, pass"
                             continue
                         fi
 
                         for MPI in ${MPIS[@]}; do
 
+                            Debug "MPI=${MPI}"
+
                             if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
-                                Info "${MPI} is not a valid MPI, pass ..."
+                                Verbose "${MPI} is not a valid MPI, pass"
                                 continue
                             fi
 
                             for MPI_VER in ${MPI_VERS[@]}; do
 
+                                Debug "MPI_VER=${MPI_VER}"
+
                                 local TEMP="VAL_`LtoU ${MPI}`_VERS[@]"
                                 if ! IsValid "${MPI_VER}" "${!TEMP}"; then
-                                    Info "${MPI_VER} is not a valid version for ${MPI}, pass ..."
+                                    Verbose "${MPI_VER} is not a valid version for ${MPI}, pass"
                                     continue
                                 fi
 
                                 for MODE in ${MODES[@]}; do
 
+                                    Debug "MODE=${MODE}"
+
                                     local TEMP="VAL_`LtoU ${MPI}`_MODES[@]"
                                     if ! IsValid "${MODE}" "${!TEMP}"; then
-                                        Info "${MODE} is not a valid mode for ${MPI}, pass ..."
+                                        Verbose "${MODE} is not a valid mode for ${MPI}, pass"
                                         continue
                                     fi
 
                                     for TL in ${TLS[@]}; do
 
+                                        Debug "TL=${TL}"
+
                                         local TEMP="VAL_`LtoU ${MODE}`_TLS[@]"
                                         if ! IsValid "${TL}" "${!TEMP}"; then
-                                            Info "${TL} is not a valid TL for ${MODE}, pass ..."
+                                            Verbose "${TL} is not a valid TL for ${MODE}, pass"
                                             continue
                                         fi
 
                                         # Define job script name
                                         local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.`printf \"%03d\"${NODE}`N.`printf \"%02d\" ${PPN}`P.`printf \"%02d\"${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local LOG="${JOB}.log"
+                                        local MPI_CMD="${MPIRUN}"
 
                                         # Prepare job script header
                                         PrepareJobHead
@@ -499,6 +532,10 @@ function ShowJob () {
 # Submit job script
 function SubmitJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local JOBID=`${SBATCH} --nodes=${NODE} --ntasks-per-node=${PPN} --output="${LOG}" "${JOB}"`
+
+    Info "${JOBID} ${JOB}"
 }
 
 
@@ -537,7 +574,7 @@ function Usage () {
     echo "     --mpi_vers       MPI versions"
     echo "     --mpi_opts       Extra MPI options"
     echo "     --modes          Modes for MPI (pml or fabirc, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
-    echo "     --tls            TLS (rc, ud, rc_x, ud_x, dc_x, ...)"
+    echo "     --tls            TLS (dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
@@ -796,11 +833,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    if ! IsNumber "$2" ; then
-                        Error ${EINTEGER} "NODES: $2 is not an integer."
-                    fi
-                    NODES="$2"
-                    Debug "NODES=${NODES}"
+                    NODES=(${2//,/ })
+                    Debug "NODES=${NODES[@]}"
                     shift 2
                     ;;
             esac
@@ -823,11 +857,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    if ! IsNumber "$2" ; then
-                        Error ${EINTEGER} "PPN: $2 is not an integer."
-                    fi
-                    PPN="$2"
-                    Debug "PPN=${PPN}"
+                    PPN=(${2//,/ })
+                    Debug "PPN=${PPN[@]}"
                     shift 2
                     ;;
             esac
@@ -851,11 +882,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    if ! IsNumber "$2" ; then
-                        Error ${EINTEGER} "THREADS: $2 is not an integer."
-                    fi
-                    THREADS="$2"
-                    Debug "THREADS=${THREADS}"
+                    THREADS=(${2//,/ })
+                    Debug "THREADS=${THREADS[@]}"
                     shift 2
                     ;;
             esac
