@@ -466,7 +466,7 @@ function BuildJob () {
                                         fi
 
                                         # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.`printf \"%03d\"${NODE}`N.`printf \"%02d\" ${PPN}`P.`printf \"%02d\"${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local LOG="${JOB}.log"
                                         local MPI_CMD="${MPIRUN}"
 
@@ -857,8 +857,8 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    PPN=(${2//,/ })
-                    Debug "PPN=${PPN[@]}"
+                    PPNS=(${2//,/ })
+                    Debug "PPN=${PPNS[@]}"
                     shift 2
                     ;;
             esac
