@@ -32,15 +32,18 @@ VAL_DAPL_TLS=("ud")
 
 
 # Default values
-APP="OSU"
-APP_VER="5.3.2"
-BENCHMARK="osu_latency"
-CLUSTER="DDDD"
+APP=""
+APP_VER=""
+BENCHMARK=""
+CLUSTER=""
 COMPILERS=("intel")
 COMPILER_VERS=("2017.4.196")
 DEBUG=0
+DEVICE="mlx5_0"
 ENV_VARS=""
+HCOLL=0
 INPUT=""
+KNEM=0
 MODES=("ob1")
 MODULES=""
 MPIS=("hpcx")
@@ -49,6 +52,8 @@ MPI_OPTS=""
 MPI_CMD="mpirun"
 NODES=(1)
 PPNS=(1)
+PORT="1"
+SHARP=0
 THREADS=(1)
 TLS=("openib")
 VERBOSE=0
@@ -249,7 +254,7 @@ function PrepareJobBody () {
 
     cat >> "${JOB}" << EOF
 
-echo "DATE=\`date +%F %T\`"
+echo "DATE=\`date "+%F %T"\`"
 echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
 echo "KERNEL=\`uname -r\`"
@@ -257,6 +262,8 @@ echo "OFED=\`ofed_info|awk 'NR==1{print $1}'\`"
 echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
+echo "DEVICE=${DEVICE}"
+echo "PORT=${PORT}"
 echo "COMPILER=${COMPILER}"
 echo "COMPILER_VERSION=${COMPILER_VER}"
 echo "MPI=${MPI}"
@@ -264,16 +271,98 @@ echo "MPI_VERSION=${MPI_VER}"
 echo "MODE=${MODE}"
 echo "TL=${TL}"
 echo "MPI_OPTS=${MPI_OPTS}"
-#echo "MPIRUN_CMD=${MPI_CMD}"
 EOF
 
     BuildMPI_CMD
+
+    cat >> "${JOB}" << EOF
+echo "MPIRUN_CMD=${MPI_CMD}"
+
+${MPI_CMD}
+EOF
 }
 
 
 # Build MPIRUN command line
 function BuildMPI_CMD () {
     Debug "Calling ${FUNCNAME[0]}($@)"
+
+    if [[ "${MPI}" == "hpcx" ]]; then
+
+        # Default options
+        MPI_CMD+=" --display-map"
+        MPI_CMD+=" --display-topo"
+        MPI_CMD+=" --report-bindings"
+
+        # PML
+        MPI_CMD+=" -mca pml ${MODE}"
+
+        if [[ "${MODE}" == "ob1" ]]; then
+            MPI_CMD+=" -mca btl openib,sm,self"
+        elif [[ "${MODE}" == "ucx" ]]; then
+            MPI_CMD+=" -x UCX_TLS=${TL},shm,self"
+            MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
+        elif [[ "${MODE}" == "yalla" ]]; then
+            MPI_CMD+=" -x MXM_TLS=${TL},shm,self"
+            MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
+        fi
+
+        MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
+
+        # HCOLL
+        MPI_CMD+=" -mca coll_fca_enable 0"
+        if [[ "${HCOLL}" == 0 ]]; then
+            MPI_CMD+=" -mca coll_hcoll_enable 0"
+        elif [[ "${HCOLL}" == 1 ]]; then
+            MPI_CMD+=" -mca coll_hcoll_enable 1"
+            MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
+        else
+            MPI_CMD+=" -mca coll_hcoll_enable 1"
+            MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
+            MPI_CMD+=" ${HCOLL}"
+        fi
+
+        # KNEM
+        if [[ "${KNEM}" == 0 ]]; then
+            MPI_CMD+=" -mca btl_sm_use_knem 0"
+        elif [[ "${KNEM}" == 1 ]]; then
+            MPI_CMD+=" -mca btl_sm_use_knem 1"
+        else
+            MPI_CMD+=" -mca btl_sm_use_knem 1"
+            MPI_CMD+=" ${KNEM}"
+        fi
+
+        # TODO: SHARP
+        if [[ "${SHARP}" != 0 ]]; then
+            Info "TBD"
+        fi
+
+    elif [[ "${MPI}" == "impi" ]]; then
+
+        # Default options
+        MPI_CMD+=" -genv I_MPI_DEBUG 4"
+
+        # FABRICS
+        MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
+        if [[ "${MODE}" == "dapl" ]]; then
+            MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
+            MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
+        elif [[ "${MODE}" == "ofa" ]]; then
+            MPI_CMD+=" -genv I_MPI_OFA_ADAPTER_NAME ${DEVICE}"
+            MPI_CMD+=" -genv I_MPI_OFA_NUM_PORTS ${PORT}"
+        fi
+    fi
+
+    # Remaining options
+    if [[ -n "${MPI_OPTS}" ]]; then
+        MPI_CMD+=" ${MPI_OPTS}"
+    fi
+
+    # APP
+    MPI_CMD+=" ${BENCHMARK}"
+    if [[ -n "${INPUT}" ]]; then
+        MPI_CMD+=" ${INPUT}"
+    fi
 }
 
 
@@ -414,34 +503,51 @@ function SubmitJob () {
 
 
 function Usage () {
-    echo "Usage: $0 TBD"
+    echo "Usage: $0 [options]"
+    echo
+    echo "  General options:"
+    echo "  -D,--debug          Debug mode"
+    echo "  -h,--help,--usage   Help page (hcoll, impi, mxm, ompi, sharp, ucx)"
+    echo "  -v,--verbose        Verbose mode"
+    echo
+    echo "  Application options:"
     echo "  -a,--app            Application"
     echo "     --app_ver        Application version"
     echo "  -b,--bench          Benchmark"
-    echo "     --cluster        Cluster"
-    echo "  -c,--compilers      Compilers (gnu, intel, ...)"
-    echo "     --compiler_vers  Compiler versions"
-    echo "  -d,--debug          Debug mode"
-    echo "  -e,--env            Environment variables"
-    echo "  -h,--help,--usage   Help page (hcoll, impi, mxm, ompi, sharp, ucx)"
     echo "  -i,--input          Input data for benchmark"
-    echo "     --modes          Modes for MPI (pml or fabirc, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
+    echo "     --cluster        Cluster"
+    echo
+    echo "  Runtime environment:"
+    echo "  -e,--env            Environment variables"
     echo "     --modules        Extra modules"
-    echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
-    echo "     --mpi_vers       MPI versions"
-    echo "     --mpi_opts       Extra MPI options"
     echo "  -n,--nodes          # of Nodes"
     echo "     --ppn            # of processes per node"
     echo "     --threads        # of threads per process"
+    echo
+    echo "  Device:"
+    echo "  -d,--device         Device"
+    echo "  -p,--port           Port"
+    echo
+    echo "  Compiler options:"
+    echo "  -c,--compilers      Compilers (gnu, intel, ...)"
+    echo "     --compiler_vers  Compiler versions"
+    echo
+    echo "  MPI options:"
+    echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
+    echo "     --mpi_vers       MPI versions"
+    echo "     --mpi_opts       Extra MPI options"
+    echo "     --modes          Modes for MPI (pml or fabirc, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
     echo "     --tls            TLS (rc, ud, rc_x, ud_x, dc_x, ...)"
-    echo "  -v,--verbose        Verbose mode"
+    echo "     --hcoll          HCOLL options"
+    echo "     --knem           KNEM options"
+    echo "     --sharp          SHARP options"
 }
 
 
 # Retrieve command line options
 CMD_OPTS=`getopt \
-    -o a:b:c:de:h::i:m:n:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,env:,help::,input:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,ppn:,threads:,tls:,usage::,verbose \
+    -o a:b:c:Dd:e:h::i:m:n:p:v \
+    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -524,10 +630,22 @@ while true do OPT; do
                     ;;
             esac
             ;;
-        -d|--debug)
+        -D|--debug)
             DEBUG=1
             VERBOSE=1
             shift
+            ;;
+        -d|--device)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    DEVICE="$2"
+                    Debug "DEVICE=${DEVICE}"
+                    shift 2
+                    ;;
+            esac
             ;;
         -e|--env)
             case "$2" in
@@ -535,11 +653,24 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    ENV_VARS=${2//,/ }
+                    ENV_VARS="$2"
                     Debug "ENV_VARS=${ENV_VARS}"
                     shift 2
                     ;;
             esac
+            ;;
+        --hcoll)
+            case "$2" in
+                "")
+                    HCOLL=1
+                    shift 2
+                    ;;
+                *)
+                    HCOLL="$2"
+                    shift 2
+                    ;;
+            esac
+            Debug "HCOLL=${HCOLL}"
             ;;
         -h|--help|--usage)
             case "$2" in
@@ -585,6 +716,19 @@ while true do OPT; do
                     shift 2
                     ;;
             esac
+            ;;
+        --knem)
+            case "$2" in
+                "")
+                    KNEM=1
+                    shift 2
+                    ;;
+                *)
+                    KNEM="$2"
+                    shift 2
+                    ;;
+            esac
+            Debug "KNEM=${KNEM}"
             ;;
         --modes)
             case "$2" in
@@ -661,6 +805,18 @@ while true do OPT; do
                     ;;
             esac
             ;;
+        -p|--port)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    PORT="$2"
+                    Debug "PORT=${PORT}"
+                    shift 2
+                    ;;
+            esac
+            ;;
         --ppn)
             case "$2" in
                 "")
@@ -675,6 +831,19 @@ while true do OPT; do
                     shift 2
                     ;;
             esac
+            ;;
+        --sharp)
+            case "$2" in
+                "")
+                    SHARP=1
+                    shift 2
+                    ;;
+                *)
+                    SHARP="$2"
+                    shift 2
+                    ;;
+            esac
+            Debug "SHARP=${SHARP}"
             ;;
         --threads)
             case "$2" in
