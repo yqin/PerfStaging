@@ -14,13 +14,21 @@ EINTEGER=2
 
 # Valid options
 # Compilers
-VAL_COMPILERS=("GNU" "INTEL")
+VAL_COMPILERS=("gnu" "intel")
 VAL_GNU_VERS=("4.4.7")
 VAL_INTEL_VERS=("2017.4.196")
 # MPIs
-VAL_MPIS=("HPCX" "IMPI")
+VAL_MPIS=("hpcx" "impi")
 VAL_HPCX_VERS=("1.9")
 VAL_IMPI_VERS=("2017.3.196")
+# MODES (PML or FABRIC)
+VAL_HPCX_MODES=("ob1" "ucx" "yalla")
+VAL_IMPI_MODES=("dapl" "ofa")
+# TLS
+VAL_OB1_TLS=("openib")
+VAL_UCX_TLS=("rc" "rc_x" "ud_x" "dc_x")
+VAL_YALLA_TLS=("rc" "ud")
+VAL_DAPL_TLS=("ud")
 
 
 # Default values
@@ -28,22 +36,21 @@ APP="OSU"
 APP_VER="5.3.2"
 BENCHMARK="osu_latency"
 CLUSTER="DDDD"
-COMPILERS=("INTEL")
+COMPILERS=("intel")
 COMPILER_VERS=("2017.4.196")
 DEBUG=0
 ENV_VARS=""
 INPUT=""
-JOB=""
-LOG=""
-MODE=""
+MODES=("ob1")
 MODULES=""
-MPIS=("HPCX")
+MPIS=("hpcx")
 MPI_VERS=("1.9")
-MPI_OPTS=("")
+MPI_OPTS=""
 MPI_CMD="mpirun"
 NODES=(1)
 PPNS=(1)
 THREADS=(1)
+TLS=("openib")
 VERBOSE=0
 
 
@@ -157,10 +164,7 @@ function Sanitize () {
 function LoadCompiler () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local COMPILER="$1"
-    local COMPILER_VER="$2"
-
-    if [[ "${COMPILER}" == "GNU" ]]; then
+    if [[ "${COMPILER}" == "gnu" ]]; then
 
         # No need to load module if system GCC is used
         if [[ "${COMPILER_VER}" == `gcc -v 2>&1 | awk 'END{print $3}'` ]]; then
@@ -169,10 +173,10 @@ function LoadCompiler () {
 
     fi
 
-    if [[ "${COMPILER}" == "INTEL" ]]; then
-        LoadModule "`UtoL ${COMPILER}`/compiler/${COMPILER_VER}"
+    if [[ "${COMPILER}" == "intel" ]]; then
+        LoadModule "${COMPILER}/compiler/${COMPILER_VER}"
     else
-        LoadModule "`UtoL ${COMPILER}`/${COMPILER_VER}"
+        LoadModule "${COMPILER}/${COMPILER_VER}"
     fi
 
     Verbose "Compiler ${COMPILER}/${COMPILER_VER} loaded."
@@ -183,26 +187,21 @@ function LoadCompiler () {
 function LoadMPI () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local COMPILER="$1"
-    local COMPILER_VER="$2"
-    local MPI="$3"
-    local MPI_VER="$4"
+    if [[ "${MPI}" == "hpcx" ]]; then
 
-    if [[ "${MPI}" == "HPCX" ]]; then
-
-        if [[ "${COMPILER}" == "INTEL" ]]; then
+        if [[ "${COMPILER}" == "intel" ]]; then
             local SUFFIX=`echo ${COMPILER_VER} | awk -F. '{print $1}'`
-            LoadModule "`UtoL ${MPI}`-${MPI_VER}/icc-${SUFFIX}" 
-        elif [[ "${COMPILER}" == "GNU" ]]; then
-            LoadModule "`UtoL ${MPI}`-${MPI_VER}/gcc"
+            LoadModule "${MPI}-${MPI_VER}/icc-${SUFFIX}" 
+        elif [[ "${COMPILER}" == "gnu" ]]; then
+            LoadModule "${MPI}-${MPI_VER}/gcc"
         else
-            LoadModule "`UtoL ${MPI}`-${MPI_VER}"
+            LoadModule "${MPI}-${MPI_VER}"
         fi
 
-    elif [[ "${MPI}" == "IMPI" ]]; then
-        LoadModule "intel/`UtoL ${MPI}`/${MPI_VER}"
+    elif [[ "${MPI}" == "impi" ]]; then
+        LoadModule "intel/${MPI}/${MPI_VER}"
     else
-        LoadModule "`UtoL ${MPI}`-${MPI_VER}"
+        LoadModule "${MPI}-${MPI_VER}"
     fi
 
     Verbose "MPI ${MPI}/${MPI_VER} loaded."
@@ -213,19 +212,14 @@ function LoadMPI () {
 function LoadApp () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local COMPILER="$1"
-    local COMPILER_VER="$2"
-    local MPI="$3"
-    local MPI_VER="$4"
-
-    LoadModule "`UtoL ${APP}`/${APP_VER}-`UtoL ${MPI}`-${MPI_VER}-`UtoL ${COMPILER}`-${COMPILER_VER}"
+    LoadModule "`UtoL ${APP}`/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}"
 
     Verbose "APP ${APP}/${APP_VER} loaded."
 }
 
 
-# Export extra environment variables
-function ExportEnvironment () {
+# Load extra environment variables
+function LoadEnvironment () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     if [[ -n ${ENV_VARS} ]]; then
@@ -255,7 +249,7 @@ function PrepareJobBody () {
 
     cat >> "${JOB}" << EOF
 
-echo "DATE=\`date +%Y-%m-%dT%H:%M:%S\`"
+echo "DATE=\`date +%F %T\`"
 echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
 echo "KERNEL=\`uname -r\`"
@@ -263,12 +257,17 @@ echo "OFED=\`ofed_info|awk 'NR==1{print $1}'\`"
 echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
-echo "MPI=${MPI}"
-echo "MPI_VERSION=${MPI_VER}"
 echo "COMPILER=${COMPILER}"
 echo "COMPILER_VERSION=${COMPILER_VER}"
-echo "MPIRUN_CMD=${MPI_CMD}"
+echo "MPI=${MPI}"
+echo "MPI_VERSION=${MPI_VER}"
+echo "MODE=${MODE}"
+echo "TL=${TL}"
+echo "MPI_OPTS=${MPI_OPTS}"
+#echo "MPIRUN_CMD=${MPI_CMD}"
 EOF
+
+    BuildMPI_CMD
 }
 
 
@@ -286,92 +285,113 @@ function BuildJob () {
     local COMPILER_VER=""
     local MPI=""
     local MPI_VER=""
+    local MODE=""
+    local TL=""
     local NODE=
     local PPN=
     local THREAD=
 
     # Permutate all valid combinations
-    for COMPILER in ${COMPILERS[@]}; do
+    for NODE in ${NODES[@]}; do
 
-        if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
-            Info "${COMPILER} is not a valid compiler, pass ..."
-            continue
-        fi
+        for PPN in ${PPNS[@]}; do
 
-        for COMPILER_VER in ${COMPILER_VERS[@]}; do
+            for THREAD in ${THREADS[@]}; do
 
-            local TEMP="VAL_${COMPILER}_VERS[@]"
-            if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
-                Info "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
-                continue
-            fi
+                for COMPILER in ${COMPILERS[@]}; do
 
-            for MPI in ${MPIS[@]}; do
-
-                if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
-                    Info "${MPI} is not a valid MPI, pass ..."
-                    continue
-                fi
-
-                for MPI_VER in ${MPI_VERS[@]}; do
-
-                    local TEMP="VAL_${MPI}_VERS[@]"
-                    if ! IsValid "${MPI_VER}" "${!TEMP}"; then
-                        Info "${MPI_VER} is not a valid version for ${MPI}, pass ..."
+                    if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
+                        Info "${COMPILER} is not a valid compiler, pass ..."
                         continue
                     fi
 
-                    # TODO: Move these to outer loops
-                    for NODE in ${NODES[@]}; do
+                    for COMPILER_VER in ${COMPILER_VERS[@]}; do
 
-                        for PPN in ${PPNS[@]}; do
+                        local TEMP="VAL_`LtoU ${COMPILER}`_VERS[@]"
+                        if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
+                            Info "${COMPILER_VER} is not a valid version for ${COMPILER}, pass ..."
+                            continue
+                        fi
 
-                            for THREAD in ${THREADS[@]}; do
+                        for MPI in ${MPIS[@]}; do
 
-                                # Define job script name
-                                JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.`printf \"%04d\" $((NODE * PPN * THREAD))`"
-                                LOG="${JOB}.log"
+                            if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
+                                Info "${MPI} is not a valid MPI, pass ..."
+                                continue
+                            fi
 
-                                # Prepare job script header
-                                PrepareJobHead
+                            for MPI_VER in ${MPI_VERS[@]}; do
 
-                                # Load compiler
-                                LoadCompiler "${COMPILER}" "${COMPILER_VER}"
+                                local TEMP="VAL_`LtoU ${MPI}`_VERS[@]"
+                                if ! IsValid "${MPI_VER}" "${!TEMP}"; then
+                                    Info "${MPI_VER} is not a valid version for ${MPI}, pass ..."
+                                    continue
+                                fi
 
-                                # Load MPI
-                                LoadMPI "${COMPILER}" "${COMPILER_VER}" "${MPI}" "${MPI_VER}"
+                                for MODE in ${MODES[@]}; do
 
-                                # Load application module
-                                LoadApp "${COMPILER}" "${COMPILER_VER}" "${MPI}" "${MPI_VER}"
+                                    local TEMP="VAL_`LtoU ${MPI}`_MODES[@]"
+                                    if ! IsValid "${MODE}" "${!TEMP}"; then
+                                        Info "${MODE} is not a valid mode for ${MPI}, pass ..."
+                                        continue
+                                    fi
 
-                                # Load extra modules
-                                LoadModule "${MODULES}"
+                                    for TL in ${TLS[@]}; do
 
-                                # Load extra environment variables
-                                ExportEnvironment
+                                        local TEMP="VAL_`LtoU ${MODE}`_TLS[@]"
+                                        if ! IsValid "${TL}" "${!TEMP}"; then
+                                            Info "${TL} is not a valid TL for ${MODE}, pass ..."
+                                            continue
+                                        fi
 
-                                # Prepare job script body
-                                PrepareJobBody
+                                        # Define job script name
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.`printf \"%03d\"${NODE}`N.`printf \"%02d\" ${PPN}`P.`printf \"%02d\"${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local LOG="${JOB}.log"
 
-                                # Show job script
-                                ShowJob
+                                        # Prepare job script header
+                                        PrepareJobHead
 
-                                # Submit job
-                                SubmitJob
+                                        # Load compiler
+                                        LoadCompiler
 
-                            done # THREAD
+                                        # Load MPI
+                                        LoadMPI
 
-                        done # PPN
+                                        # Load application module
+                                        LoadApp
 
-                    done # NODE
+                                        # Load extra modules
+                                        LoadModule "${MODULES}"
 
-                done # MPI_VER
+                                        # Load extra environment variables
+                                        LoadEnvironment
 
-            done # MPI
+                                        # Prepare job script body
+                                        PrepareJobBody
 
-        done # COMPILER_VER
+                                        # Show job script
+                                        ShowJob
 
-    done # COMPILER
+                                        # Submit job
+                                        SubmitJob
+
+                                    done # TL
+
+                                done # MODE
+
+                            done # MPI_VER
+
+                        done # MPI
+
+                    done # COMPILER_VER
+
+                done # COMPILER
+
+            done # THREAD
+
+        done # PPN
+
+    done # NODE
 }
 
 
@@ -395,31 +415,33 @@ function SubmitJob () {
 
 function Usage () {
     echo "Usage: $0 TBD"
-    echo "  -a,--app                Application"
-    echo "     --app_ver            Application version"
-    echo "  -b,--bench              Benchmark"
-    echo "     --cluster            Cluster"
-    echo "  -c,--compilers          Compilers"
-    echo "     --compiler_vers      Compiler versions"
-    echo "  -d,--debug              Debug mode"
-    echo "  -e,--env                Environment variables"
-    echo "  -h,--help,--usage       Help page (hcoll, mxm, ompi, sharp, ucx)"
-    echo "  -i,--input              Input data for benchmark"
-    echo "     --modules            Extra modules"
-    echo "  -m,--mpis               MPI"
-    echo "     --mpi_vers           MPI version"
-    echo "     --mpi_opts           Extra MPI options"
-    echo "  -n,--nodes              # of Nodes"
-    echo "     --ppn                # of processes per node"
-    echo "     --threads            # of threads per process"
-    echo "  -v,--verbose            Verbose mode"
+    echo "  -a,--app            Application"
+    echo "     --app_ver        Application version"
+    echo "  -b,--bench          Benchmark"
+    echo "     --cluster        Cluster"
+    echo "  -c,--compilers      Compilers (gnu, intel, ...)"
+    echo "     --compiler_vers  Compiler versions"
+    echo "  -d,--debug          Debug mode"
+    echo "  -e,--env            Environment variables"
+    echo "  -h,--help,--usage   Help page (hcoll, impi, mxm, ompi, sharp, ucx)"
+    echo "  -i,--input          Input data for benchmark"
+    echo "     --modes          Modes for MPI (pml or fabirc, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
+    echo "     --modules        Extra modules"
+    echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
+    echo "     --mpi_vers       MPI versions"
+    echo "     --mpi_opts       Extra MPI options"
+    echo "  -n,--nodes          # of Nodes"
+    echo "     --ppn            # of processes per node"
+    echo "     --threads        # of threads per process"
+    echo "     --tls            TLS (rc, ud, rc_x, ud_x, dc_x, ...)"
+    echo "  -v,--verbose        Verbose mode"
 }
 
 
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:de:h::i:m:n:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,env:,help::,input:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,ppn:,threads:,usage::,verbose \
+    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,env:,help::,input:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,ppn:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -484,7 +506,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    COMPILERS=(`LtoU ${2//,/ }`)
+                    COMPILERS=(`UtoL ${2//,/ }`)
                     Debug "COMPILERS=(${COMPILERS[@]})"
                     shift 2
                     ;;
@@ -529,6 +551,10 @@ while true do OPT; do
                     hcoll_info -a
                     shift 2
                     ;;
+                impi)
+                    mpirun --help
+                    shift 2
+                    ;;
                 mxm)
                     mxm_dump_config -f
                     shift 2
@@ -560,6 +586,18 @@ while true do OPT; do
                     ;;
             esac
             ;;
+        --modes)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    MODES=(`UtoL ${2//,/ }`)
+                    Debug "MODES=(${MODES[@]})"
+                    shift 2
+                    ;;
+            esac
+            ;;
         --modules)
             case "$2" in
                 "")
@@ -578,7 +616,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    MPIS=(`LtoU ${2//,/ }`)
+                    MPIS=(`UtoL ${2//,/ }`)
                     Debug "MPIS=(${MPIS[@]})"
                     shift 2
                     ;;
@@ -649,6 +687,18 @@ while true do OPT; do
                     fi
                     THREADS="$2"
                     Debug "THREADS=${THREADS}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --tls)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    TLS=(`UtoL ${2//,/ }`)
+                    Debug "TLS=(${TLS[@]})"
                     shift 2
                     ;;
             esac
