@@ -573,7 +573,7 @@ function Usage () {
     echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
     echo "     --mpi_vers       MPI versions"
     echo "     --mpi_opts       Extra MPI options"
-    echo "     --modes          Modes for MPI (pml or fabirc, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
+    echo "     --modes          Modes for MPI (pml or fabric, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
     echo "     --tls            TLS (dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
@@ -590,6 +590,8 @@ CMD_OPTS=`getopt \
 if [[ $? != 0 ]]; then
     Error ${EOPTARG} "Failed to parse command line options."
 fi
+
+Info "$0 $@"
 
 eval set -- "$CMD_OPTS"
 
