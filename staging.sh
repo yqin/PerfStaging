@@ -269,6 +269,7 @@ echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
 echo "INPUT=${INPUT}"
+echo "NODELIST=\$\{SLURM_NODELIST\}"
 echo "NODES=${NODE}"
 echo "PPN=${PPN}"
 echo "THREADS=${THREAD}"
@@ -281,12 +282,14 @@ echo "MPI_VERSION=${MPI_VER}"
 echo "MODE=${MODE}"
 echo "TL=${TL}"
 echo "MPI_OPTS=${MPI_OPTS}"
+echo "ENV_VARS=${ENV_VARS}"
 EOF
 
     BuildMPI_CMD
 
     cat >> "${JOB}" << EOF
 echo "MPIRUN_CMD=${MPI_CMD}"
+echo "ENV=\`env\`"
 echo
 echo
 
@@ -574,7 +577,7 @@ function Usage () {
     echo "     --mpi_vers       MPI versions"
     echo "     --mpi_opts       Extra MPI options"
     echo "     --modes          Modes for MPI (pml or fabric, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
-    echo "     --tls            TLS (dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
+    echo "     --tls            TLS (openib, dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
@@ -591,7 +594,12 @@ if [[ $? != 0 ]]; then
     Error ${EOPTARG} "Failed to parse command line options."
 fi
 
-Info "$0 $@"
+if [[ $# < 1 ]]; then
+    Usage
+    exit 0
+else
+    Info "$0 $@"
+fi
 
 eval set -- "$CMD_OPTS"
 
@@ -692,7 +700,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    ENV_VARS="$2"
+                    ENV_VARS="${2//,/ }"
                     Debug "ENV_VARS=${ENV_VARS}"
                     shift 2
                     ;;
