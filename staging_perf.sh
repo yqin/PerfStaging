@@ -477,7 +477,7 @@ function BuildJob () {
                                         fi
 
                                         # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local LOG="${JOB}.log"
                                         local MPI_CMD="${MPIRUN}"
 
