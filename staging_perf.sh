@@ -23,13 +23,17 @@ VAL_HPCX_VERS=("1.9" "2.0")
 VAL_IMPI_VERS=("2017.3.196")
 # MODES (PML or FABRIC)
 VAL_HPCX_MODES=("ob1" "ucx" "yalla")
-VAL_IMPI_MODES=("dapl" "ofa")
+VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
 # TLS
 VAL_OB1_TLS=("openib")
 VAL_UCX_TLS=("dc_x" "rc" "rc_x" "ud_x")
 VAL_YALLA_TLS=("dc" "rc" "ud")
+VAL_SHM_TLS=("impi")
 VAL_DAPL_TLS=("impi")
+VAL_TCP_TLS=("impi")
+VAL_TMI_TLS=("impi")
 VAL_OFA_TLS=("impi")
+VAL_OFI_TLS=("impi")
 
 
 # Default values
@@ -269,7 +273,7 @@ echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
 echo "INPUT=${INPUT}"
-echo "NODELIST=\$\{SLURM_NODELIST\}"
+echo "NODELIST=\${SLURM_NODELIST}"
 echo "NODES=${NODE}"
 echo "PPN=${PPN}"
 echo "THREADS=${THREAD}"
