@@ -362,15 +362,19 @@ function BuildMPI_CMD () {
 
         # Default options
         MPI_CMD+=" -genv I_MPI_DEBUG 4"
+        MPI_CMD+=" -genv I_MPI_FALLBACK 0"
 
         # FABRICS
         MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
         if [[ "${MODE}" == "dapl" ]]; then
             MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
             MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
+        elif [[ "${MODE}" == "tmi" ]]; then
+            continue
         elif [[ "${MODE}" == "ofa" ]]; then
             MPI_CMD+=" -genv I_MPI_OFA_ADAPTER_NAME ${DEVICE}"
-            MPI_CMD+=" -genv I_MPI_OFA_NUM_PORTS ${PORT}"
+        elif [[ "${MODE}" == "ofi" ]]; then
+            continue
         fi
     fi
 
