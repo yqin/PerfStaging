@@ -37,36 +37,45 @@ VAL_OFI_TLS=("impi")
 
 
 # Default values
+DEBUG=0
+VERBOSE=0
+
+ENV_VARS=( )
+MODULES=( )
+
+CLUSTER=""
+
+SBATCH="sbatch"
+SLURM_TIME=3600
+SLURM_OPTS=""
+
 APP=""
 APP_VER=""
 BENCHMARK=""
-CLUSTER=""
+INPUT=""
+
+NODES=(1)
+PPNS=(1)
+THREADS=(1)
+PXT=0
+
+DEVICE="mlx5_0"
+PORT="1"
+
 COMPILERS=("intel")
 COMPILER_VERS=("2017.4.196")
-DEBUG=0
-DEVICE="mlx5_0"
-ENV_VARS=( )
-HCOLL=0
-INPUT=""
-KNEM=0
-MODES=("ob1")
-MODULES=( )
+
 MPIS=("hpcx")
 MPI_VERS=("1.9")
 # TODO: make it array?
 MPI_OPTS=""
+MODES=("ob1")
 MPIRUN="mpirun"
-NODES=(1)
-PPNS=(1)
-PORT="1"
-SBATCH="sbatch"
-SLURM_TIME=3600
-SLURM_OPTS=""
-SHARP=0
-THREADS=(1)
 TLS=("openib")
-VERBOSE=0
 
+HCOLL=0
+KNEM=0
+SHARP=0
 
 # GLOBAL functions
 # Print error message
@@ -456,6 +465,11 @@ function BuildJob () {
 
                 Debug "THREAD=${THREAD}"
 
+                if [[ ${PXT} != 0 && ${PXT} != $((${PPN} * ${THREAD})) ]]; then
+                    Verbose "${PPN}*${THREAD}!=${PXT}, pass"
+                    continue
+                fi
+
                 for COMPILER in ${COMPILERS[@]}; do
 
                     Debug "COMPILER=${COMPILER}"
@@ -515,7 +529,7 @@ function BuildJob () {
                                         fi
 
                                         # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREAD}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local JOB_SCRIPT=""
                                         local MPI_CMD="${MPIRUN}"
 
@@ -603,16 +617,17 @@ function Usage () {
     echo "  -i,--input          Input data for benchmark"
     echo "     --cluster        Cluster"
     echo
-    echo "  Runtime environment:"
-    echo "  -e,--env            Environment variables"
-    echo "     --modules        Extra modules"
-    echo "  -n,--nodes          # of Nodes"
-    echo "     --ppn            # of processes per node"
-    echo "     --threads        # of threads per process"
-    echo
     echo "  Slurm:"
     echo "     --slurm_time     Slurm time limit"
     echo "     --slurm_opts     Extra Slurm options"
+    echo
+    echo "  Runtime environment:"
+    echo "  -e,--env            Extra environment variables"
+    echo "     --modules        Extra modules"
+    echo "  -n,--nodes          # of Nodes"
+    echo "     --ppn            # of processes/ranks per node"
+    echo "     --threads        # of threads per process"
+    echo "     --pxt            # of (ppn * threads), when provided, only run combinations when (ppn * threads == pxt)"
     echo
     echo "  Device:"
     echo "  -d,--device         Device"
@@ -637,7 +652,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -919,6 +934,18 @@ while true do OPT; do
                 *)
                     PPNS=(${2//,/ })
                     Debug "PPN=${PPNS[@]}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --pxt)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    PXT="$2"
+                    Debug "PXT=${PXT}"
                     shift 2
                     ;;
             esac
