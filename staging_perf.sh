@@ -60,9 +60,10 @@ NODES=(1)
 PPNS=(1)
 PORT="1"
 SBATCH="sbatch"
+SLURM_TIME=3600
+SLURM_OPTS=""
 SHARP=0
 THREADS=(1)
-TIME=3600
 TLS=("openib")
 VERBOSE=0
 
@@ -270,6 +271,13 @@ function PrepareJobHead () {
 
     read -r -d '' TMP <<- EOS
 #!${SHELL}
+#SBATCH --nodes=${NODE}
+#SBATCH --ntasks-per-node=${PPN}
+#SBATCH --cpus-per-task=${THREAD}
+#SBATCH --time=${SLURM_TIME}
+#SBATCH --job-name=${JOB}
+#SBATCH --output=${JOB}.log
+#SBATCH ${SLURM_OPTS}
 module purge
 EOS
 
@@ -289,6 +297,7 @@ echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
 echo "KERNEL=\`uname -r\`"
 echo "OFED=\`ofed_info|awk 'NR==1{print \$1}'\`"
+echo "OPA=***TBD***"
 echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
 echo "BENCHMARK=${BENCHMARK}"
@@ -327,9 +336,9 @@ EOS
     JOB_SCRIPT+=$'\n'
     JOB_SCRIPT+="${TMP}"
 
-    echo "${JOB_SCRIPT}" > "${JOB_NAME}"
+    echo "${JOB_SCRIPT}" > "${JOB}.sh"
 
-    Info "Built ${JOB_NAME}"
+    Info "Built ${JOB}"
 }
 
 
@@ -506,8 +515,7 @@ function BuildJob () {
                                         fi
 
                                         # Define job script name
-                                        local JOB_NAME="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
-                                        local JOB_LOG="${JOB_NAME}.log"
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local JOB_SCRIPT=""
                                         local MPI_CMD="${MPIRUN}"
 
@@ -566,7 +574,7 @@ function ShowJob () {
 
     while read LINE; do
         Debug "${LINE}"
-    done < "${JOB_NAME}"
+    done < "${JOB}.sh"
 }
 
 
@@ -574,9 +582,9 @@ function ShowJob () {
 function SubmitJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local JOBID=`${SBATCH} --nodes=${NODE} --ntasks-per-node=${PPN} --time=${TIME} --output="${JOB_LOG}" "${JOB_NAME}"`
+    local JOBID=`${SBATCH} "${JOB}.sh"`
 
-    Info "${JOBID} ${JOB_NAME}"
+    Info "${JOBID} ${JOB}"
 }
 
 
@@ -603,7 +611,8 @@ function Usage () {
     echo "     --threads        # of threads per process"
     echo
     echo "  Slurm:"
-    echo "     --time           Slurm time limit"
+    echo "     --slurm_time     Slurm time limit"
+    echo "     --slurm_opts     Extra Slurm options"
     echo
     echo "  Device:"
     echo "  -d,--device         Device"
@@ -628,7 +637,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,threads:,time:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -927,6 +936,30 @@ while true do OPT; do
             esac
             Debug "SHARP=${SHARP}"
             ;;
+        --slurm_opts)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    SLURM_OPTS="$2"
+                    Debug "SLURM_OPTS=${SLURM_OPTS}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --slurm_time)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    SLURM_TIME="$2"
+                    Debug "SLURM_TIME=${SLURM_TIME}"
+                    shift 2
+                    ;;
+            esac
+            ;;
         --threads)
             case "$2" in
                 "")
@@ -935,18 +968,6 @@ while true do OPT; do
                 *)
                     THREADS=(${2//,/ })
                     Debug "THREADS=${THREADS[@]}"
-                    shift 2
-                    ;;
-            esac
-            ;;
-        --time)
-            case "$2" in
-                "")
-                    shift 2
-                    ;;
-                *)
-                    TIME="$2"
-                    Debug "TIME=${TIME}"
                     shift 2
                     ;;
             esac
