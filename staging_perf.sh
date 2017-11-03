@@ -45,14 +45,15 @@ COMPILERS=("intel")
 COMPILER_VERS=("2017.4.196")
 DEBUG=0
 DEVICE="mlx5_0"
-ENV_VARS=""
+ENV_VARS=( )
 HCOLL=0
 INPUT=""
 KNEM=0
 MODES=("ob1")
-MODULES=""
+MODULES=( )
 MPIS=("hpcx")
 MPI_VERS=("1.9")
+# TODO: make it array?
 MPI_OPTS=""
 MPIRUN="mpirun"
 NODES=(1)
@@ -61,6 +62,7 @@ PORT="1"
 SBATCH="sbatch"
 SHARP=0
 THREADS=(1)
+TIME=3600
 TLS=("openib")
 VERBOSE=0
 
@@ -140,9 +142,14 @@ function LoadModule () {
     local MODULE="$@"
 
     if [[ -n "${MODULE}" ]]; then
-        cat >> "${JOB}" << EOF
+        local TMP=""
+
+        read -r -d '' TMP <<- EOS
 module load ${MODULE}
-EOF
+EOS
+
+        JOB_SCRIPT+=$'\n'
+        JOB_SCRIPT+="${TMP}"
 
         Verbose "Loaded module \"${MODULE}\""
     fi
@@ -233,17 +240,25 @@ function LoadApp () {
 function LoadEnvironment () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    cat >> "${JOB}" << EOF
+    local TMP=""
+
+    read -r -d '' TMP <<- EOS
 export OMP_NUM_THREADS=${THREAD}
-EOF
+EOS
 
-    if [[ -n ${ENV_VARS} ]]; then
-        cat >> "${JOB}" << EOF
-export ${ENV_VARS}
-EOF
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
 
-        Verbose "Exported environment variables \"${ENV_VARS}\""
-    fi
+    for VAR in ${ENV_VARS[@]}; do
+        read -r -d '' TMP <<- EOS
+export ${VAR}
+EOS
+
+        JOB_SCRIPT+=$'\n'
+        JOB_SCRIPT+="${TMP}"
+    done
+
+    Verbose "Exported environment variables \"OMP_NUM_THREADS=${THREAD} ${ENV_VARS[@]}\""
 }
 
 
@@ -251,10 +266,14 @@ EOF
 function PrepareJobHead () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    cat > "${JOB}" << EOF
+    local TMP=""
+
+    read -r -d '' TMP <<- EOS
 #!${SHELL}
 module purge
-EOF
+EOS
+
+    JOB_SCRIPT="${TMP}"
 }
 
 
@@ -262,8 +281,9 @@ EOF
 function PrepareJobBody () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    cat >> "${JOB}" << EOF
+    local TMP=""
 
+    read -r -d '' TMP <<- EOS
 echo "DATE=\`date "+%F %T"\`"
 echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
@@ -287,20 +307,29 @@ echo "MODE=${MODE}"
 echo "TL=${TL}"
 echo "MPI_OPTS=${MPI_OPTS}"
 echo "ENV_VARS=${ENV_VARS}"
-EOF
+EOS
+
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
 
     BuildMPI_CMD
 
-    cat >> "${JOB}" << EOF
+    read -r -d '' TMP <<- EOS
 echo "MPIRUN_CMD=${MPI_CMD}"
 echo "ENV=\`env\`"
 echo
 echo
 
 ${MPI_CMD}
-EOF
+EOS
 
-    Info "Built ${JOB}"
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
+
+    echo "${JOB_SCRIPT}" > "${JOB_NAME}"
+
+    Info "Built ${JOB_NAME}"
 }
 
 
@@ -477,8 +506,9 @@ function BuildJob () {
                                         fi
 
                                         # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
-                                        local LOG="${JOB}.log"
+                                        local JOB_NAME="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREADS}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB_LOG="${JOB_NAME}.log"
+                                        local JOB_SCRIPT=""
                                         local MPI_CMD="${MPIRUN}"
 
                                         # Prepare job script header
@@ -494,7 +524,7 @@ function BuildJob () {
                                         LoadApp
 
                                         # Load extra modules
-                                        LoadModule "${MODULES}"
+                                        LoadModule "${MODULES[@]}"
 
                                         # Load extra environment variables
                                         LoadEnvironment
@@ -536,7 +566,7 @@ function ShowJob () {
 
     while read LINE; do
         Debug "${LINE}"
-    done < "${JOB}"
+    done < "${JOB_NAME}"
 }
 
 
@@ -544,9 +574,9 @@ function ShowJob () {
 function SubmitJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local JOBID=`${SBATCH} --nodes=${NODE} --ntasks-per-node=${PPN} --output="${LOG}" "${JOB}"`
+    local JOBID=`${SBATCH} --nodes=${NODE} --ntasks-per-node=${PPN} --time=${TIME} --output="${JOB_LOG}" "${JOB_NAME}"`
 
-    Info "${JOBID} ${JOB}"
+    Info "${JOBID} ${JOB_NAME}"
 }
 
 
@@ -561,7 +591,7 @@ function Usage () {
     echo "  Application options:"
     echo "  -a,--app            Application"
     echo "     --app_ver        Application version"
-    echo "  -b,--bench          Benchmark"
+    echo "  -b,--bench,--exec   Benchmark executable"
     echo "  -i,--input          Input data for benchmark"
     echo "     --cluster        Cluster"
     echo
@@ -571,6 +601,9 @@ function Usage () {
     echo "  -n,--nodes          # of Nodes"
     echo "     --ppn            # of processes per node"
     echo "     --threads        # of threads per process"
+    echo
+    echo "  Slurm:"
+    echo "     --time           Slurm time limit"
     echo
     echo "  Device:"
     echo "  -d,--device         Device"
@@ -595,7 +628,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,sharp::,threads:,time:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -637,7 +670,7 @@ while true do OPT; do
                     ;;
             esac
             ;;
-        -b|--bench)
+        -b|--bench|--exec)
             case "$2" in
                 "")
                     shift 2
@@ -709,7 +742,7 @@ while true do OPT; do
                     ;;
                 *)
                     ENV_VARS="${2//,/ }"
-                    Debug "ENV_VARS=${ENV_VARS}"
+                    Debug "ENV_VARS=(${ENV_VARS[@]})"
                     shift 2
                     ;;
             esac
@@ -804,7 +837,7 @@ while true do OPT; do
                     ;;
                 *)
                     MODULES=${2//,/ }
-                    Debug "MODULES=${MODULES}"
+                    Debug "MODULES=(${MODULES[@]})"
                     shift 2
                     ;;
             esac
@@ -902,6 +935,18 @@ while true do OPT; do
                 *)
                     THREADS=(${2//,/ })
                     Debug "THREADS=${THREADS[@]}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --time)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    TIME="$2"
+                    Debug "TIME=${TIME}"
                     shift 2
                     ;;
             esac
