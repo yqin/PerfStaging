@@ -46,6 +46,8 @@ MODULES=( )
 SBATCH="sbatch"
 SLURM_TIME=3600
 SLURM_OPTS=""
+# Command/script to stage data/input for Slurm jobs
+SLURM_STAGE=""
 
 CLUSTER=""
 
@@ -288,7 +290,8 @@ function PrepareJobHead () {
 #SBATCH --cpus-per-task=${THREAD}
 #SBATCH --time=${SLURM_TIME}
 #SBATCH --job-name=${JOB}
-#SBATCH --output=${JOB}.log
+#SBATCH --output=${PWD}/${JOB}/${JOB}.log
+#SBATCH --workdir=${PWD}/${JOB}
 #SBATCH ${SLURM_OPTS}
 module purge
 EOS
@@ -348,7 +351,19 @@ EOS
     JOB_SCRIPT+=$'\n'
     JOB_SCRIPT+="${TMP}"
 
-    echo "${JOB_SCRIPT}" > "${JOB}.sh"
+    # Create workdir for each individual job
+    mkdir -p "${JOB}"
+
+    # Perform staging process to prepare the job
+    if [[ -n "${SLURM_STAGE}" ]]; then
+        local CURRENT_DIR="${PWD}"
+        cd "${JOB}"
+        ${SLURM_STAGE} >/dev/null 2>&1
+        cd "${CURRENT_DIR}"
+        Verbose "Run staging script for ${JOB}"
+    fi
+
+    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
 
     Info "Built ${JOB}"
 }
@@ -594,7 +609,7 @@ function ShowJob () {
 
     while read LINE; do
         Debug "${LINE}"
-    done < "${JOB}.sh"
+    done < "${JOB}/${JOB}.sh"
 }
 
 
@@ -602,7 +617,7 @@ function ShowJob () {
 function SubmitJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local JOBID=`${SBATCH} "${JOB}.sh"`
+    local JOBID=`${SBATCH} "${JOB}/${JOB}.sh"`
 
     Info "${JOBID} ${JOB}"
 }
@@ -626,6 +641,7 @@ function Usage () {
     echo "  Slurm:"
     echo "     --slurm_time     Slurm time limit"
     echo "     --slurm_opts     Extra Slurm options"
+    echo "     --slurm_stage    Command(s) or script(s) to stage data/input for Slurm jobs"
     echo
     echo "  Runtime environment:"
     echo "  -e,--env            Extra environment variables"
@@ -661,7 +677,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -1016,6 +1032,18 @@ while true do OPT; do
                 *)
                     SLURM_OPTS="$2"
                     Debug "SLURM_OPTS=${SLURM_OPTS}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --slurm_stage)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    SLURM_STAGE="$2"
+                    Debug "SLURM_STAGE=${SLURM_STAGE}"
                     shift 2
                     ;;
             esac
