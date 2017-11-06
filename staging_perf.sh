@@ -648,6 +648,9 @@ function Usage () {
     echo "     --mpi_vers       MPI versions"
     echo "     --mpi_opts       Extra MPI options"
     echo "     --modes          Modes for MPI (pml or fabric, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
+    echo "     --map-by         OMPI --map-by option"
+    echo "     --rank-by        OMPI --rank-by option"
+    echo "     --bind-to        OMPI --bind-to option"
     echo "     --tls            TLS (openib, dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
@@ -658,7 +661,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -708,6 +711,18 @@ while true do OPT; do
                 *)
                     BENCHMARK="$2"
                     Debug "BENCHMARK=${BENCHMARK}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --bind-to)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    BIND_TO="$2"
+                    Debug "BIND_TO=${BIND_TO}"
                     shift 2
                     ;;
             esac
@@ -848,6 +863,18 @@ while true do OPT; do
             esac
             Debug "KNEM=${KNEM}"
             ;;
+        --map-by)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    MAP_BY="$2"
+                    Debug "MAP_BY=${MAP_BY}"
+                    shift 2
+                    ;;
+            esac
+            ;;
         --modes)
             case "$2" in
                 "")
@@ -952,6 +979,18 @@ while true do OPT; do
                 *)
                     PXT="$2"
                     Debug "PXT=${PXT}"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --rank-by)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    RANK_BY="$2"
+                    Debug "RANK_BY=${RANK_BY}"
                     shift 2
                     ;;
             esac
