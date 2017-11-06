@@ -37,50 +37,62 @@ VAL_OFI_TLS=("impi")
 
 
 # Default values
-DEBUG=0
-VERBOSE=0
+DEBUG=${DEBUG:-0}
+VERBOSE=${VERBOSE:-0}
 
 ENV_VARS=( )
 MODULES=( )
 
 SBATCH="sbatch"
-SLURM_TIME=3600
-SLURM_OPTS=""
+SLURM_TIME=${SLURM_TIME:-3600}
+SLURM_OPTS=${SLURM_OPTS:-""}
 # Command/script to stage data/input for Slurm jobs
-SLURM_STAGE=""
+SLURM_STAGE=${SLURM_STAGE:-""}
 
-CLUSTER=""
+CLUSTER=${CLUSTER:-""}
 
-APP=""
-APP_VER=""
-BENCHMARK=""
-INPUT=""
+APP=${APP:-""}
+APP_VER=${APP_VER:-""}
+BENCHMARK=${BENCHMARK:-""}
+INPUT=${INPUT:-""}
 
-NODES=(1)
-PPNS=(1)
-THREADS=(1)
-PXT=0
+NODES=(${NODES[@]:-"1"})
+PPNS=(${PPNS[@]:-"1"})
+THREADS=(${THREADS[@]:-"1"})
+PXT=${PXT:-"0"}
 
-DEVICE="mlx5_0"
-PORT="1"
+DEVICE=${DEVICE:-"mlx5_0"}
+PORT=${PORT:-"1"}
 
-COMPILERS=("intel")
-COMPILER_VERS=("2017.4.196")
+# Some variables can be defined in environment, has to be a multi-value string
+# e.g., COMPILERS="intel gnu"
+COMPILERS=(${COMPILERS[@]:-"intel"})
+COMPILER_VERS=(${COMPILER_VERS[@]:-"2017.4.196"})
 
-MPIS=("hpcx")
-MPI_VERS=("1.9")
+MPIS=(${MPIS[@]:-"hpcx"})
+MPI_VERS=(${MPI_VERS[@]:-"1.9"})
 # TODO: make it array?
-MPI_OPTS=""
-MAP_BY="socket"
-RANK_BY="core"
-BIND_TO="core"
-MODES=("ob1")
+MPI_OPTS=${MPI_OPTS:-""}
+MAP_BY=${MAP_BY:-"socket"}
+RANK_BY=${RANK_BY:-"core"}
+BIND_TO=${BIND_TO:-"core"}
+MODES=(${MODES[@]:-"ob1"})
 MPIRUN="mpirun"
-TLS=("openib")
+TLS=(${TLS[@]:-"openib"})
 
-HCOLL=0
-KNEM=0
-SHARP=0
+MXM_OPTS=${MXM_OPTS:-""}
+UCX_OPTS=${UCX_OPTS:-""}
+YALLA_OPTS=${YALLA_OPTS:-""}
+DAPL_OPTS=${DAPL_OPTS:-""}
+TMI_OPTS=${TMI_OPTS:-""}
+OFA_OPTS=${OFA_OPTS:-""}
+OFI_OPTS=${OFI_OPTS:-""}
+HCOLL=${HCOLL:-"0"}
+HCOLL_OPTS=${HCOLL_OPTS:-""}
+KNEM=${KNEM:-"0"}
+KNEM_OPTS=${KNEM_OPTS:-""}
+SHARP=${SHARP:-"0"}
+SHARP_OPTS=${SHARP_OPTS:-""}
 
 # GLOBAL functions
 # Print error message
