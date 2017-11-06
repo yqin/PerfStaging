@@ -43,11 +43,11 @@ VERBOSE=0
 ENV_VARS=( )
 MODULES=( )
 
-CLUSTER=""
-
 SBATCH="sbatch"
 SLURM_TIME=3600
 SLURM_OPTS=""
+
+CLUSTER=""
 
 APP=""
 APP_VER=""
@@ -69,6 +69,9 @@ MPIS=("hpcx")
 MPI_VERS=("1.9")
 # TODO: make it array?
 MPI_OPTS=""
+MAP_BY="socket"
+RANK_BY="core"
+BIND_TO="core"
 MODES=("ob1")
 MPIRUN="mpirun"
 TLS=("openib")
@@ -361,6 +364,9 @@ function BuildMPI_CMD () {
         MPI_CMD+=" --display-map"
         MPI_CMD+=" --display-topo"
         MPI_CMD+=" --report-bindings"
+        MPI_CMD+=" --map-by ${MAP_BY}:PE=${THREAD}"
+        MPI_CMD+=" --rank-by ${RANK_BY}"
+        MPI_CMD+=" --bind-to ${BIND_TO}"
 
         # PML
         MPI_CMD+=" -mca pml ${MODE}"
