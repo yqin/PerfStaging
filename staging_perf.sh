@@ -16,11 +16,11 @@ EINTEGER=2
 # Compilers
 VAL_COMPILERS=("gnu" "intel")
 VAL_GNU_VERS=("4.4.7" "4.8.5" "4.9.3" "5.4.0")
-VAL_INTEL_VERS=("2017.4.196")
+VAL_INTEL_VERS=("2017.4.196" "2017.5.239")
 # MPIs
 VAL_MPIS=("hpcx" "impi")
 VAL_HPCX_VERS=("1.9" "2.0")
-VAL_IMPI_VERS=("2017.3.196")
+VAL_IMPI_VERS=("2017.3.196" "2017.4.239")
 # MODES (PML or FABRIC)
 VAL_HPCX_MODES=("ob1" "ucx" "yalla")
 VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
@@ -44,7 +44,7 @@ ENV_VARS=( )
 MODULES=( )
 
 SBATCH="sbatch"
-SLURM_TIME=${SLURM_TIME:-3600}
+SLURM_TIME=${SLURM_TIME:-60}
 SLURM_OPTS=${SLURM_OPTS:-""}
 # Command/script to stage data/input for Slurm jobs
 SLURM_STAGE=${SLURM_STAGE:-""}
@@ -100,7 +100,7 @@ function Error () {
     local EXIT="$1"
     shift
     local MSG="$@"
-    echo "`date +"%b %d %H:%M:%S"` ERROR: "$MSG"" >&2
+    echo "$(date +"%b %d %H:%M:%S") ERROR: "$MSG"" >&2
     exit $EXIT
 }
 
@@ -108,7 +108,7 @@ function Error () {
 # Print info message
 function Info () {
     local MSG="$@"
-    echo "`date +"%b %d %H:%M:%S"` INFO: "$MSG"" >&2
+    echo "$(date +"%b %d %H:%M:%S") INFO: "$MSG"" >&2
 }
 
 
@@ -116,7 +116,7 @@ function Info () {
 function Verbose () {
     local MSG="$@"
     if [[ ${VERBOSE} == 1 ]]; then
-        echo "`date +"%b %d %H:%M:%S"` VERBOSE: "$MSG"" >&2
+        echo "$(date +"%b %d %H:%M:%S") VERBOSE: "$MSG"" >&2
     fi  
 }
 
@@ -125,7 +125,7 @@ function Verbose () {
 function Debug () {
     local MSG="$@"
     if [[ ${DEBUG} == 1 ]]; then
-        echo "`date +"%b %d %H:%M:%S"` DEBUG: "$MSG"" >&2
+        echo "$(date +"%b %d %H:%M:%S") DEBUG: "$MSG"" >&2
     fi  
 }
 
@@ -212,7 +212,7 @@ function LoadCompiler () {
     if [[ "${COMPILER}" == "gnu" ]]; then
 
         # No need to load module if system GCC is used
-        if [[ "${COMPILER_VER}" == `gcc -v 2>&1 | awk 'END{print $3}'` ]]; then
+        if [[ "${COMPILER_VER}" == $(gcc -v 2>&1 | awk 'END{print $3}') ]]; then
             return
         fi
 
@@ -235,7 +235,7 @@ function LoadMPI () {
     if [[ "${MPI}" == "hpcx" ]]; then
 
         if [[ "${COMPILER}" == "intel" ]]; then
-            local SUFFIX=`echo ${COMPILER_VER} | awk -F. '{print $1}'`
+            local SUFFIX=$(echo ${COMPILER_VER} | awk -F. '{print $1}')
             LoadModule "${MPI}-${MPI_VER}/icc-${SUFFIX}" 
         elif [[ "${COMPILER}" == "gnu" ]]; then
             LoadModule "${MPI}-${MPI_VER}/gcc"
@@ -257,7 +257,7 @@ function LoadMPI () {
 function LoadApp () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    LoadModule "`UtoL ${APP}`/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}"
+    LoadModule "$(UtoL ${APP})/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}"
 
     Verbose "Loaded APP \"${APP}/${APP_VER}\""
 }
@@ -302,7 +302,7 @@ function PrepareJobHead () {
 #SBATCH --cpus-per-task=${THREAD}
 #SBATCH --time=${SLURM_TIME}
 #SBATCH --job-name=${JOB}
-#SBATCH --output=${PWD}/${JOB}/${JOB}.log
+#SBATCH --output=${PWD}/${JOB}/${JOB}-%j.log
 #SBATCH --workdir=${PWD}/${JOB}
 #SBATCH ${SLURM_OPTS}
 module purge
@@ -365,19 +365,22 @@ EOS
 
     # Create workdir for each individual job
     mkdir -p "${JOB}"
+    Debug "Made directory \"${JOB}\""
 
     # Perform staging process to prepare the job
     if [[ -n "${SLURM_STAGE}" ]]; then
         local CURRENT_DIR="${PWD}"
         cd "${JOB}"
-        ${SLURM_STAGE} >/dev/null 2>&1
+        Debug "Running staging script from \"${JOB}\""
+        local RETURN=$(eval "${SLURM_STAGE}")
+        Debug "Staging script returned ($?): \"${RETURN}\""
         cd "${CURRENT_DIR}"
-        Verbose "Run staging script for ${JOB}"
+        Verbose "Run staging script for \"${JOB}\""
     fi
 
     echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
 
-    Info "Built ${JOB}"
+    Info "Built \"${JOB}\""
 }
 
 
@@ -399,7 +402,7 @@ function BuildMPI_CMD () {
         MPI_CMD+=" -mca pml ${MODE}"
 
         if [[ "${MODE}" == "ob1" ]]; then
-            MPI_CMD+=" -mca btl openib,sm,self"
+            MPI_CMD+=" -mca btl openib,vader,self"
         elif [[ "${MODE}" == "ucx" ]]; then
             MPI_CMD+=" -x UCX_TLS=${TL},shm,self"
             MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
@@ -449,12 +452,8 @@ function BuildMPI_CMD () {
         if [[ "${MODE}" == "dapl" ]]; then
             MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
             MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
-        elif [[ "${MODE}" == "tmi" ]]; then
-            continue
         elif [[ "${MODE}" == "ofa" ]]; then
             MPI_CMD+=" -genv I_MPI_OFA_ADAPTER_NAME ${DEVICE}"
-        elif [[ "${MODE}" == "ofi" ]]; then
-            continue
         fi
     fi
 
@@ -508,7 +507,7 @@ function BuildJob () {
                     Debug "COMPILER=${COMPILER}"
 
                     if ! IsValid "${COMPILER}" "${VAL_COMPILERS[@]}"; then
-                        Verbose "${COMPILER} is not a valid compiler, pass"
+                        Verbose "\"${COMPILER}\" is not a valid compiler, pass"
                         continue
                     fi
 
@@ -516,9 +515,9 @@ function BuildJob () {
 
                         Debug "COMPILER_VER=${COMPILER_VER}"
 
-                        local TEMP="VAL_`LtoU ${COMPILER}`_VERS[@]"
+                        local TEMP="VAL_$(LtoU ${COMPILER})_VERS[@]"
                         if ! IsValid "${COMPILER_VER}" "${!TEMP}"; then
-                            Verbose "${COMPILER_VER} is not a valid version for ${COMPILER}, pass"
+                            Verbose "\"${COMPILER_VER}\" is not a valid version for ${COMPILER}, pass"
                             continue
                         fi
 
@@ -527,7 +526,7 @@ function BuildJob () {
                             Debug "MPI=${MPI}"
 
                             if ! IsValid "${MPI}" "${VAL_MPIS[@]}"; then
-                                Verbose "${MPI} is not a valid MPI, pass"
+                                Verbose "\"${MPI}\" is not a valid MPI, pass"
                                 continue
                             fi
 
@@ -535,9 +534,9 @@ function BuildJob () {
 
                                 Debug "MPI_VER=${MPI_VER}"
 
-                                local TEMP="VAL_`LtoU ${MPI}`_VERS[@]"
+                                local TEMP="VAL_$(LtoU ${MPI})_VERS[@]"
                                 if ! IsValid "${MPI_VER}" "${!TEMP}"; then
-                                    Verbose "${MPI_VER} is not a valid version for ${MPI}, pass"
+                                    Verbose "\"${MPI_VER}\" is not a valid version for ${MPI}, pass"
                                     continue
                                 fi
 
@@ -545,9 +544,9 @@ function BuildJob () {
 
                                     Debug "MODE=${MODE}"
 
-                                    local TEMP="VAL_`LtoU ${MPI}`_MODES[@]"
+                                    local TEMP="VAL_$(LtoU ${MPI})_MODES[@]"
                                     if ! IsValid "${MODE}" "${!TEMP}"; then
-                                        Verbose "${MODE} is not a valid mode for ${MPI}, pass"
+                                        Verbose "\"${MODE}\" is not a valid mode for ${MPI}, pass"
                                         continue
                                     fi
 
@@ -555,14 +554,14 @@ function BuildJob () {
 
                                         Debug "TL=${TL}"
 
-                                        local TEMP="VAL_`LtoU ${MODE}`_TLS[@]"
+                                        local TEMP="VAL_$(LtoU ${MODE})_TLS[@]"
                                         if ! IsValid "${TL}" "${!TEMP}"; then
-                                            Verbose "${TL} is not a valid TL for ${MODE}, pass"
+                                            Verbose "\"${TL}\" is not a valid TL for ${MODE}, pass"
                                             continue
                                         fi
 
                                         # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.`printf "%03d" ${NODE}`N.`printf "%02d" ${PPN}`P.`printf "%02d" ${THREAD}`T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%03d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local JOB_SCRIPT=""
                                         local MPI_CMD="${MPIRUN}"
 
@@ -629,9 +628,9 @@ function ShowJob () {
 function SubmitJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    local JOBID=`${SBATCH} "${JOB}/${JOB}.sh"`
+    local JOBID=$(${SBATCH} "${JOB}/${JOB}.sh")
 
-    Info "${JOBID} ${JOB}"
+    Info "Submitted ${JOBID} \"${JOB}\""
 }
 
 
@@ -773,7 +772,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    COMPILERS=(`UtoL ${2//,/ }`)
+                    COMPILERS=($(UtoL ${2//,/ }))
                     Debug "COMPILERS=(${COMPILERS[@]})"
                     shift 2
                     ;;
@@ -909,7 +908,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    MODES=(`UtoL ${2//,/ }`)
+                    MODES=($(UtoL ${2//,/ }))
                     Debug "MODES=(${MODES[@]})"
                     shift 2
                     ;;
@@ -933,7 +932,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    MPIS=(`UtoL ${2//,/ }`)
+                    MPIS=($(UtoL ${2//,/ }))
                     Debug "MPIS=(${MPIS[@]})"
                     shift 2
                     ;;
@@ -1090,7 +1089,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    TLS=(`UtoL ${2//,/ }`)
+                    TLS=($(UtoL ${2//,/ }))
                     Debug "TLS=(${TLS[@]})"
                     shift 2
                     ;;
