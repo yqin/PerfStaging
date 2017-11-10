@@ -43,8 +43,8 @@ VERBOSE=${VERBOSE:-0}
 ENV_VARS=( )
 MODULES=( )
 
-SBATCH="sbatch"
-SLURM_TIME=${SLURM_TIME:-60}
+SBATCH=${SBATCH:-"sbatch"}
+SLURM_TIME=${SLURM_TIME:-"30:0"}
 SLURM_OPTS=${SLURM_OPTS:-""}
 # Command/script to stage data/input for Slurm jobs
 SLURM_STAGE=${SLURM_STAGE:-""}
@@ -64,7 +64,7 @@ PXT=${PXT:-"0"}
 DEVICE=${DEVICE:-"mlx5_0"}
 PORT=${PORT:-"1"}
 
-# Some variables can be defined in environment, has to be a multi-value string
+# Arrays defined in environment have to be multi-value strings
 # e.g., COMPILERS="intel gnu"
 COMPILERS=(${COMPILERS[@]:-"intel"})
 COMPILER_VERS=(${COMPILER_VERS[@]:-"2017.4.196"})
@@ -77,7 +77,7 @@ MAP_BY=${MAP_BY:-"socket"}
 RANK_BY=${RANK_BY:-"core"}
 BIND_TO=${BIND_TO:-"core"}
 MODES=(${MODES[@]:-"ob1"})
-MPIRUN="mpirun"
+MPIRUN=${MPIRUN:-"mpirun"}
 TLS=(${TLS[@]:-"openib"})
 
 MXM_OPTS=${MXM_OPTS:-""}
@@ -93,6 +93,7 @@ KNEM=${KNEM:-"0"}
 KNEM_OPTS=${KNEM_OPTS:-""}
 SHARP=${SHARP:-"0"}
 SHARP_OPTS=${SHARP_OPTS:-""}
+
 
 # GLOBAL functions
 # Print error message
@@ -289,12 +290,40 @@ EOS
 }
 
 
+# Build common part of job script
+function BuildJobCommon () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    # Header
+    BuildJobHeader
+
+    # Load compiler
+    LoadCompiler
+
+    # Load MPI
+    LoadMPI
+
+    # Load application module
+    LoadApp
+
+    # Load extra modules
+    LoadModule "${MODULES[@]}"
+
+    # Load extra environment variables
+    LoadEnvironment
+
+    # Body
+    BuildJobBody
+}
+
+
 # Prepare job script header
-function PrepareJobHead () {
+function BuildJobHeader () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     local TMP=""
 
+    # Header
     read -r -d '' TMP <<- EOS
 #!${SHELL}
 #SBATCH --nodes=${NODE}
@@ -313,11 +342,12 @@ EOS
 
 
 # Prepare job script body
-function PrepareJobBody () {
+function BuildJobBody () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     local TMP=""
 
+    # TODO: fill ***TBD***
     read -r -d '' TMP <<- EOS
 echo "DATE=\`date "+%F %T"\`"
 echo "CLUSTER=${CLUSTER}"
@@ -343,17 +373,28 @@ echo "MODE=${MODE}"
 echo "TL=${TL}"
 echo "MPI_OPTS=${MPI_OPTS}"
 echo "ENV_VARS=${ENV_VARS}"
+echo "ENV=\`env\`"
 EOS
 
     JOB_SCRIPT+=$'\n'
     JOB_SCRIPT+=$'\n'
     JOB_SCRIPT+="${TMP}"
+}
+
+
+# Loop through all MPI option combinations
+function BuildJobMPI () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local TMP=""
+
+    local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+    local MPI_CMD="${MPIRUN}"
 
     BuildMPI_CMD
 
     read -r -d '' TMP <<- EOS
 echo "MPIRUN_CMD=${MPI_CMD}"
-echo "ENV=\`env\`"
 echo
 echo
 
@@ -365,7 +406,7 @@ EOS
 
     # Create workdir for each individual job
     mkdir -p "${JOB}"
-    Debug "Made directory \"${JOB}\""
+    Debug "Created directory \"${JOB}\""
 
     # Perform staging process to prepare the job
     if [[ -n "${SLURM_STAGE}" ]]; then
@@ -375,12 +416,18 @@ EOS
         local RETURN=$(eval "${SLURM_STAGE}")
         Debug "Staging script returned ($?): \"${RETURN}\""
         cd "${CURRENT_DIR}"
-        Verbose "Run staging script for \"${JOB}\""
+        Verbose "Staging script for \"${JOB}\" was run"
     fi
 
     echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
 
     Info "Built \"${JOB}\""
+
+    # Show job script
+    ShowJob
+
+    # Submit job
+    SubmitJob
 }
 
 
@@ -457,16 +504,30 @@ function BuildMPI_CMD () {
         fi
     fi
 
-    # Remaining options
-    if [[ -n "${MPI_OPTS}" ]]; then
-        MPI_CMD+=" ${MPI_OPTS}"
-    fi
+#    # TODO: need to loop through MODE_OPTS, MPI_OPTS, KNEM_OPTS, HCOLL_OPTS, etc.
+#    # Map specific MODE options and loop through it 
+#    local MODE_OPTS=($(LtoU ${MODE})_OPTS[@])
+#
+#    if [[ ${#MODE_OPTS[@]} != 0 ]]; then
+#
+#        local MODE_OPT=""
+#
+#        for MODE_OPT in ${MODE_OPTS[@]}; do
+#
+#            Debug "MODE_OPT=${MODE_OPT}"
+#
+#            MPI_CMD+=" ${MODE_OPT}"
+#
+            # Remaining options
+            if [[ -n "${MPI_OPTS}" ]]; then
+                MPI_CMD+=" ${MPI_OPTS}"
+            fi
 
-    # APP
-    MPI_CMD+=" ${BENCHMARK}"
-    if [[ -n "${INPUT}" ]]; then
-        MPI_CMD+=" ${INPUT}"
-    fi
+            # APP
+            MPI_CMD+=" ${BENCHMARK}"
+            if [[ -n "${INPUT}" ]]; then
+                MPI_CMD+=" ${INPUT}"
+            fi
 }
 
 
@@ -560,37 +621,14 @@ function BuildJob () {
                                             continue
                                         fi
 
-                                        # Define job script name
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%03d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        # Variable to store job script
                                         local JOB_SCRIPT=""
-                                        local MPI_CMD="${MPIRUN}"
 
-                                        # Prepare job script header
-                                        PrepareJobHead
+                                        # Build common part of job script
+                                        BuildJobCommon
 
-                                        # Load compiler
-                                        LoadCompiler
-
-                                        # Load MPI
-                                        LoadMPI
-
-                                        # Load application module
-                                        LoadApp
-
-                                        # Load extra modules
-                                        LoadModule "${MODULES[@]}"
-
-                                        # Load extra environment variables
-                                        LoadEnvironment
-
-                                        # Prepare job script body
-                                        PrepareJobBody
-
-                                        # Show job script
-                                        ShowJob
-
-                                        # Submit job
-                                        SubmitJob
+                                        # Loop through all MPI option combinations
+                                        BuildJobMPI
 
                                     done # TL
 
@@ -673,12 +711,13 @@ function Usage () {
     echo "  MPI options:"
     echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
     echo "     --mpi_vers       MPI versions"
+    echo "     --mpirun         Redefine MPIRUN launcher (mpirun, oshrun, upcrun, ...)"
     echo "     --mpi_opts       Extra MPI options"
     echo "     --modes          Modes for MPI (pml or fabric, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
     echo "     --map-by         OMPI --map-by option"
     echo "     --rank-by        OMPI --rank-by option"
     echo "     --bind-to        OMPI --bind-to option"
-    echo "     --tls            TLS (openib, dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
+    echo "     --tls            TLs (openib, dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
@@ -688,7 +727,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -922,6 +961,18 @@ while true do OPT; do
                 *)
                     MODULES=${2//,/ }
                     Debug "MODULES=(${MODULES[@]})"
+                    shift 2
+                    ;;
+            esac
+            ;;
+        --mpirun)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    MPIRUN="$2"
+                    Debug "MPIRUN=${MPIRUN}"
                     shift 2
                     ;;
             esac
