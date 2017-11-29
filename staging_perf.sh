@@ -388,7 +388,6 @@ function BuildJobMPI () {
 
     local TMP=""
 
-    local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
     local MPI_CMD="${MPIRUN}"
 
     BuildMPI_CMD
@@ -449,7 +448,7 @@ function BuildMPI_CMD () {
         MPI_CMD+=" -mca pml ${MODE}"
 
         if [[ "${MODE}" == "ob1" ]]; then
-            MPI_CMD+=" -mca btl openib,vader,self"
+            MPI_CMD+=" -mca btl ${TL},vader,self"
         elif [[ "${MODE}" == "ucx" ]]; then
             MPI_CMD+=" -x UCX_TLS=${TL},shm,self"
             MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
@@ -622,6 +621,7 @@ function BuildJob () {
                                         fi
 
                                         # Variable to store job script
+                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local JOB_SCRIPT=""
 
                                         # Build common part of job script
