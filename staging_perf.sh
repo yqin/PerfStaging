@@ -26,7 +26,7 @@ VAL_HPCX_MODES=("ob1" "ucx" "yalla")
 VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
 # TLS
 VAL_OB1_TLS=("openib")
-VAL_UCX_TLS=("dc_x" "rc" "rc_x" "ud_x")
+VAL_UCX_TLS=("dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
 VAL_YALLA_TLS=("dc" "rc" "ud")
 VAL_SHM_TLS=("impi")
 VAL_DAPL_TLS=("impi")
