@@ -3,10 +3,10 @@
 # Two hooks are expected.
 #
 
-# Function to collect metrics from finised jobs.
-function collect () {
+# Function to collect application dedicated  metrics from finised jobs.
+function Collect () {
 }
 
 # Function to plot metrics from finished jobs.
-function plot () {
+function Plot () {
 }

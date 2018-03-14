@@ -1,0 +1,7 @@
+#
+# This is the common module shares among all applications.
+#
+
+# Function to collect metadata and common metrics from finised jobs.
+function CollectCommon () {
+}
