@@ -14,16 +14,19 @@ EINTEGER=2
 
 # Valid options
 # Compilers
-VAL_COMPILERS=("gnu" "intel")
+VAL_COMPILERS=("gcc" "intel")
 VAL_GNU_VERS=("4.8.5")
 VAL_INTEL_VERS=("2018.1.163")
+
 # MPIs
 VAL_MPIS=("hpcx" "impi")
-VAL_HPCX_VERS=("1.9" "2.0")
-VAL_IMPI_VERS=("2017.3.196" "2017.4.239")
+VAL_HPCX_VERS=("2.0.0" "2.1.0")
+VAL_IMPI_VERS=("2018.1.163")
+
 # MODES (PML or FABRIC)
 VAL_HPCX_MODES=("ob1" "ucx" "yalla")
 VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
+
 # TLS
 VAL_OB1_TLS=("openib")
 VAL_UCX_TLS=("dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
@@ -53,7 +56,7 @@ CLUSTER=${CLUSTER:-""}
 
 APP=${APP:-""}
 APP_VER=${APP_VER:-""}
-BENCHMARK=${BENCHMARK:-""}
+EXECUTABLE=${EXECUTABLE:-""}
 INPUT=${INPUT:-""}
 
 NODES=(${NODES[@]:-"1"})
@@ -65,12 +68,12 @@ DEVICE=${DEVICE:-"mlx5_0"}
 PORT=${PORT:-"1"}
 
 # Arrays defined in environment have to be multi-value strings
-# e.g., COMPILERS="intel gnu"
+# e.g., COMPILERS="intel gcc"
 COMPILERS=(${COMPILERS[@]:-"intel"})
-COMPILER_VERS=(${COMPILER_VERS[@]:-"2017.4.196"})
+COMPILER_VERS=(${COMPILER_VERS[@]:-"2018.1.163"})
 
 MPIS=(${MPIS[@]:-"hpcx"})
-MPI_VERS=(${MPI_VERS[@]:-"1.9"})
+MPI_VERS=(${MPI_VERS[@]:-"2.1"})
 # TODO: make it array?
 MPI_OPTS=${MPI_OPTS:-""}
 MAP_BY=${MAP_BY:-"socket"}
@@ -196,8 +199,8 @@ function Sanitize () {
         Error ${EOPTARG} "Application version not provided."
     fi
 
-    if [[ -z "${BENCHMARK}" ]]; then
-        Error ${EOPTARG} "Benchmark not provided."
+    if [[ -z "${EXECUTABLE}" ]]; then
+        Error ${EOPTARG} "Application binary or executable not provided."
     fi
 
     if [[ -z "${CLUSTER}" ]]; then
@@ -210,20 +213,7 @@ function Sanitize () {
 function LoadCompiler () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    if [[ "${COMPILER}" == "gnu" ]]; then
-
-        # No need to load module if system GCC is used
-        if [[ "${COMPILER_VER}" == $(gcc -v 2>&1 | awk 'END{print $3}') ]]; then
-            return
-        fi
-
-    fi
-
-    if [[ "${COMPILER}" == "intel" ]]; then
-        LoadModule "${COMPILER}/compiler/${COMPILER_VER}"
-    else
-        LoadModule "${COMPILER}/${COMPILER_VER}"
-    fi
+    LoadModule "${COMPILER}/${COMPILER_VER}"
 
     Verbose "Loaded compiler \"${COMPILER}/${COMPILER_VER}\""
 }
@@ -233,22 +223,7 @@ function LoadCompiler () {
 function LoadMPI () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    if [[ "${MPI}" == "hpcx" ]]; then
-
-        if [[ "${COMPILER}" == "intel" ]]; then
-            local SUFFIX=$(echo ${COMPILER_VER} | awk -F. '{print $1}')
-            LoadModule "${MPI}-${MPI_VER}/icc-${SUFFIX}" 
-        elif [[ "${COMPILER}" == "gnu" ]]; then
-            LoadModule "${MPI}-${MPI_VER}/gcc"
-        else
-            LoadModule "${MPI}-${MPI_VER}"
-        fi
-
-    elif [[ "${MPI}" == "impi" ]]; then
-        LoadModule "intel/${MPI}/${MPI_VER}"
-    else
-        LoadModule "${MPI}-${MPI_VER}"
-    fi
+    LoadModule "${MPI}/${MPI_VER}"
 
     Verbose "Loaded MPI \"${MPI}/${MPI_VER}\""
 }
@@ -258,7 +233,10 @@ function LoadMPI () {
 function LoadApp () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    LoadModule "$(UtoL ${APP})/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}"
+    local APPMODULE=$( (module av -t) 2>&1 | grep -e "$(UtoL ${APP})/${APP_VER}-${MPI}-${MPI_VER}-${COMPILER}-${COMPILER_VER}" )
+
+    Debug "Matched application module is: ${APPMODULE}"
+    LoadModule "${APPMODULE}"
 
     Verbose "Loaded APP \"${APP}/${APP_VER}\""
 }
@@ -325,7 +303,8 @@ function BuildJobHeader () {
 
     # Header
     read -r -d '' TMP <<- EOS
-#!${SHELL}
+#!${SHELL} -l
+#SBATCH --partition=${CLUSTER}
 #SBATCH --nodes=${NODE}
 #SBATCH --ntasks-per-node=${PPN}
 #SBATCH --cpus-per-task=${THREAD}
@@ -333,11 +312,25 @@ function BuildJobHeader () {
 #SBATCH --job-name=${JOB}
 #SBATCH --output=${PWD}/${JOB}/${JOB}-%j.log
 #SBATCH --workdir=${PWD}/${JOB}
-#SBATCH ${SLURM_OPTS}
-module purge
 EOS
 
     JOB_SCRIPT="${TMP}"
+
+    if [[ -n ${SLURM_OPTS} ]]; then
+        read -r -d '' TMP <<- EOS
+#SBATCH ${SLURM_OPTS}
+EOS
+
+    JOB_SCRIPT+="${TMP}"
+    fi
+
+    read -r -d '' TMP <<- EOS
+module purge
+EOS
+
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
 }
 
 
@@ -353,11 +346,13 @@ echo "DATE=\`date "+%F %T"\`"
 echo "CLUSTER=${CLUSTER}"
 echo "OS=\`cat /etc/redhat-release\`"
 echo "KERNEL=\`uname -r\`"
-echo "OFED=\`ofed_info|awk 'NR==1{print \$1}'\`"
+echo "OFED=\`ofed_info -s | sed 's/://'\`"
 echo "OPA=***TBD***"
+echo "HCA_TYPE=\`ibstat ${DEVICE} | grep type | awk '{print \$3}'\`"
+echo "HCA_FIRMWARE=\`ibstat ${DEVICE} | grep Firmware | awk '{print \$3}'\`"
 echo "APP=${APP}"
 echo "APP_VERSION=${APP_VER}"
-echo "BENCHMARK=${BENCHMARK}"
+echo "EXECUTABLE=${EXECUTABLE}"
 echo "INPUT=${INPUT}"
 echo "NODELIST=\${SLURM_NODELIST}"
 echo "NODES=${NODE}"
@@ -397,7 +392,7 @@ echo "MPIRUN_CMD=${MPI_CMD}"
 echo
 echo
 
-${MPI_CMD}
+time ${MPI_CMD}
 EOS
 
     JOB_SCRIPT+=$'\n'
@@ -523,7 +518,7 @@ function BuildMPI_CMD () {
             fi
 
             # APP
-            MPI_CMD+=" ${BENCHMARK}"
+            MPI_CMD+=" ${EXECUTABLE}"
             if [[ -n "${INPUT}" ]]; then
                 MPI_CMD+=" ${INPUT}"
             fi
@@ -621,7 +616,7 @@ function BuildJob () {
                                         fi
 
                                         # Variable to store job script
-                                        local JOB="${APP}-${APP_VER}-${BENCHMARK}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
+                                        local JOB="${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
                                         local JOB_SCRIPT=""
 
                                         # Build common part of job script
@@ -683,7 +678,7 @@ function Usage () {
     echo "  Application options:"
     echo "  -a,--app            Application"
     echo "     --app_ver        Application version"
-    echo "  -b,--bench,--exec   Benchmark executable"
+    echo "  -b,--bin,--exe      Application binary or executable"
     echo "  -i,--input          Input data for benchmark"
     echo "     --cluster        Cluster"
     echo
@@ -705,7 +700,7 @@ function Usage () {
     echo "  -p,--port           Port"
     echo
     echo "  Compiler options:"
-    echo "  -c,--compilers      Compilers (gnu, intel, ...)"
+    echo "  -c,--compilers      Compilers (gcc, intel, ...)"
     echo "     --compiler_vers  Compiler versions"
     echo
     echo "  MPI options:"
@@ -727,7 +722,7 @@ function Usage () {
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bench:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exec:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bin:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exe:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -769,14 +764,14 @@ while true do OPT; do
                     ;;
             esac
             ;;
-        -b|--bench|--exec)
+        -b|--bin|--exe)
             case "$2" in
                 "")
                     shift 2
                     ;;
                 *)
-                    BENCHMARK="$2"
-                    Debug "BENCHMARK=${BENCHMARK}"
+                    EXECUTABLE="$2"
+                    Debug "EXECUTABLE=${EXECUTABLE}"
                     shift 2
                     ;;
             esac
