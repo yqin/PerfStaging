@@ -1,0 +1,12 @@
+#
+# This is the app module for NAMD.
+# Two hooks are expected.
+#
+
+# Function to collect metrics from finised jobs.
+function collect () {
+}
+
+# Function to plot metrics from finished jobs.
+function plot () {
+}
