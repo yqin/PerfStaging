@@ -28,15 +28,15 @@ VAL_HPCX_MODES=("ob1" "ucx" "yalla")
 VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
 
 # TLS
-VAL_OB1_TLS=("openib")
-VAL_UCX_TLS=("dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
-VAL_YALLA_TLS=("dc" "rc" "ud")
-VAL_SHM_TLS=("impi")
-VAL_DAPL_TLS=("impi")
-VAL_TCP_TLS=("impi")
-VAL_TMI_TLS=("impi")
-VAL_OFA_TLS=("impi")
-VAL_OFI_TLS=("impi")
+VAL_OB1_TLS=("oob" "openib")
+VAL_UCX_TLS=("oob" "dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
+VAL_YALLA_TLS=("oob" "dc" "rc" "ud")
+VAL_SHM_TLS=("oob")
+VAL_DAPL_TLS=("oob")
+VAL_TCP_TLS=("oob")
+VAL_TMI_TLS=("oob")
+VAL_OFA_TLS=("oob")
+VAL_OFI_TLS=("oob")
 
 
 # Default values
@@ -50,6 +50,7 @@ SBATCH=${SBATCH:-"sbatch"}
 SLURM_TIME=${SLURM_TIME:-"30:0"}
 SLURM_OPTS=${SLURM_OPTS:-""}
 # Command/script to stage data/input for Slurm jobs
+# e.g., --slurm_stage="ln -s ../input/* ./"
 SLURM_STAGE=${SLURM_STAGE:-""}
 
 CLUSTER=${CLUSTER:-""}
