@@ -15,8 +15,8 @@ EINTEGER=2
 # Valid options
 # Compilers
 VAL_COMPILERS=("gnu" "intel")
-VAL_GNU_VERS=("4.4.7" "4.8.5" "4.9.3" "5.4.0")
-VAL_INTEL_VERS=("2017.4.196" "2017.5.239")
+VAL_GNU_VERS=("4.8.5")
+VAL_INTEL_VERS=("2018.1.163")
 # MPIs
 VAL_MPIS=("hpcx" "impi")
 VAL_HPCX_VERS=("1.9" "2.0")
