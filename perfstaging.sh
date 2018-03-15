@@ -31,12 +31,6 @@ VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
 VAL_OB1_TLS=("oob" "openib")
 VAL_UCX_TLS=("oob" "dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
 VAL_YALLA_TLS=("oob" "dc" "rc" "ud")
-VAL_SHM_TLS=("oob")
-VAL_DAPL_TLS=("oob")
-VAL_TCP_TLS=("oob")
-VAL_TMI_TLS=("oob")
-VAL_OFA_TLS=("oob")
-VAL_OFI_TLS=("oob")
 
 
 # Default values
@@ -74,29 +68,28 @@ COMPILERS=(${COMPILERS[@]:-"intel"})
 COMPILER_VERS=(${COMPILER_VERS[@]:-"2018.1.163"})
 
 MPIS=(${MPIS[@]:-"hpcx"})
-MPI_VERS=(${MPI_VERS[@]:-"2.1"})
+MPI_VERS=(${MPI_VERS[@]:-"2.1.0"})
 # TODO: make it array?
 MPI_OPTS=${MPI_OPTS:-""}
 MAP_BY=${MAP_BY:-"socket"}
 RANK_BY=${RANK_BY:-"core"}
 BIND_TO=${BIND_TO:-"core"}
-MODES=(${MODES[@]:-"ob1"})
+MODES=(${MODES[@]:-"ucx"})
 MPIRUN=${MPIRUN:-"mpirun"}
-TLS=(${TLS[@]:-"openib"})
+TLS=(${TLS[@]:-"oob"})
 
-MXM_OPTS=${MXM_OPTS:-""}
-UCX_OPTS=${UCX_OPTS:-""}
-YALLA_OPTS=${YALLA_OPTS:-""}
-DAPL_OPTS=${DAPL_OPTS:-""}
-TMI_OPTS=${TMI_OPTS:-""}
-OFA_OPTS=${OFA_OPTS:-""}
-OFI_OPTS=${OFI_OPTS:-""}
-HCOLL=${HCOLL:-"0"}
-HCOLL_OPTS=${HCOLL_OPTS:-""}
-KNEM=${KNEM:-"0"}
-KNEM_OPTS=${KNEM_OPTS:-""}
-SHARP=${SHARP:-"0"}
-SHARP_OPTS=${SHARP_OPTS:-""}
+#MXM_OPTS=${MXM_OPTS:-""}
+#UCX_OPTS=${UCX_OPTS:-""}
+#YALLA_OPTS=${YALLA_OPTS:-""}
+#DAPL_OPTS=${DAPL_OPTS:-""}
+#TMI_OPTS=${TMI_OPTS:-""}
+#OFA_OPTS=${OFA_OPTS:-""}
+#OFI_OPTS=${OFI_OPTS:-""}
+
+HCOLL_OPTS=(${HCOLL_OPTS:-"0"})
+KNEM_OPTS=(${KNEM_OPTS:-"0"})
+SHARP_OPTS=(${SHARP_OPTS:-"0"})
+TM_OPTS=(${TM_OPTS:-"0"})
 
 
 # GLOBAL functions
@@ -248,6 +241,7 @@ function LoadEnvironment () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     local TMP=""
+    JOB_SCRIPT+=$'\n'
 
     read -r -d '' TMP <<- EOS
 export OMP_NUM_THREADS=${THREAD}
@@ -378,30 +372,9 @@ EOS
 }
 
 
-# Loop through all MPI option combinations
-function BuildJobMPI () {
+# Run staging script before job submission
+function StageJob () {
     Debug "Calling ${FUNCNAME[0]}($@)"
-
-    local TMP=""
-
-    local MPI_CMD="${MPIRUN}"
-
-    BuildMPI_CMD
-
-    read -r -d '' TMP <<- EOS
-echo "MPIRUN_CMD=${MPI_CMD}"
-echo
-echo
-
-time ${MPI_CMD}
-EOS
-
-    JOB_SCRIPT+=$'\n'
-    JOB_SCRIPT+="${TMP}"
-
-    # Create workdir for each individual job
-    mkdir -p "${JOB}"
-    Debug "Created directory \"${JOB}\""
 
     # Perform staging process to prepare the job
     if [[ -n "${SLURM_STAGE}" ]]; then
@@ -413,35 +386,95 @@ EOS
         cd "${CURRENT_DIR}"
         Verbose "Staging script for \"${JOB}\" was run"
     fi
-
-    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
-
-    Info "Built \"${JOB}\""
-
-    # Show job script
-    ShowJob
-
-    # Submit job
-    SubmitJob
 }
 
 
-# Build MPIRUN command line
-function BuildMPI_CMD () {
+# Build HPCX job script
+function BuildJobHPCX () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
-    if [[ "${MPI}" == "hpcx" ]]; then
+    local TL=""
+    local HCOLL_OPT=""
+    local KNEM_OPT=""
+    local SHARP_OPT=""
+    local TM_OPT=""
 
-        # Default options
-        MPI_CMD+=" --display-map"
-        MPI_CMD+=" --display-topo"
-        MPI_CMD+=" --report-bindings"
-        MPI_CMD+=" --map-by ${MAP_BY}:PE=${THREAD}"
-        MPI_CMD+=" --rank-by ${RANK_BY}"
-        MPI_CMD+=" --bind-to ${BIND_TO}"
+    for TL in ${TLS[@]}; do
 
-        # PML
-        MPI_CMD+=" -mca pml ${MODE}"
+        Debug "TL=${TL}"
+
+        local TEMP="VAL_$(LtoU ${MODE})_TLS[@]"
+        if ! IsValid "${TL}" "${!TEMP}"; then
+            Verbose "\"${TL}\" is not a valid TL for ${MODE}, pass"
+            continue
+        fi
+
+        for HCOLL_OPT in ${HCOLL_OPTS[@]}; do
+
+            Debug "HCOLL_OPT=${HCOLL_OPT}"
+
+            for KNEM_OPT in ${KNEM_OPTS[@]}; do
+
+                Debug "KNEM_OPT=${KNEM_OPT}"
+
+                for TM_OPT in ${TM_OPTS[@]}; do
+
+                    Debug "TM_OPT=${TM_OPT}"
+
+                    # Variable to store job script
+                    local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                    local JOB_SCRIPT=""
+
+                    # Build common part for the job script
+                    BuildJobCommon
+
+                    # Build MPIRUN command line for the job script
+                    BuildJobHPCX_MPI_CMD
+
+                    # Create workdir for the job
+                    mkdir -p "${JOB}"
+                    Debug "Created directory \"${JOB}\""
+                    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
+                    Info "Built \"${JOB}\""
+
+                    # Show job script
+                    ShowJob
+
+                    # Stage job
+                    StageJob
+
+                    # Submit job
+                    SubmitJob
+
+                done # TM_OPT
+
+            done # KNEM_OPT
+
+        done # HCOLL_OPT
+
+    done # TL
+}
+
+
+# Build HPCX mpirun command line
+function BuildJobHPCX_MPI_CMD () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local TMP=""
+    local MPI_CMD="${MPIRUN}"
+
+    # HPCX default options
+    MPI_CMD+=" --display-map"
+    MPI_CMD+=" --display-topo"
+    MPI_CMD+=" --report-bindings"
+    MPI_CMD+=" --map-by ${MAP_BY}:PE=${THREAD}"
+    MPI_CMD+=" --rank-by ${RANK_BY}"
+    MPI_CMD+=" --bind-to ${BIND_TO}"
+
+    # PML
+    MPI_CMD+=" -mca pml ${MODE}"
+
+    if [[ "${TL}" != "oob" ]]; then
 
         if [[ "${MODE}" == "ob1" ]]; then
             MPI_CMD+=" -mca btl ${TL},vader,self"
@@ -457,72 +490,145 @@ function BuildMPI_CMD () {
 
         # HCOLL
         MPI_CMD+=" -mca coll_fca_enable 0"
-        if [[ "${HCOLL}" == 0 ]]; then
+        if [[ "${HCOLL_OPT}" == 0 ]]; then
             MPI_CMD+=" -mca coll_hcoll_enable 0"
-        elif [[ "${HCOLL}" == 1 ]]; then
+        elif [[ "${HCOLL_OPT}" == 1 ]]; then
             MPI_CMD+=" -mca coll_hcoll_enable 1"
             MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
         else
             MPI_CMD+=" -mca coll_hcoll_enable 1"
             MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
-            MPI_CMD+=" ${HCOLL}"
+            MPI_CMD+=" -x ${HCOLL_OPT}"
         fi
 
         # KNEM
-        if [[ "${KNEM}" == 0 ]]; then
+        if [[ "${KNEM_OPT}" == 0 ]]; then
             MPI_CMD+=" -mca btl_sm_use_knem 0"
-        elif [[ "${KNEM}" == 1 ]]; then
-            MPI_CMD+=" -mca btl_sm_use_knem 1"
         else
             MPI_CMD+=" -mca btl_sm_use_knem 1"
-            MPI_CMD+=" ${KNEM}"
         fi
 
-        # TODO: SHARP
-        if [[ "${SHARP}" != 0 ]]; then
-            Info "TBD"
+        # TM
+        if [[ "${MODE}" == "ucx" ]]; then
+
+            if [[ "${TL}" != "ud" || "${TL}" != "ud_x" ]]; then
+
+                if [[ "${TM_OPT}" == 0 ]]; then
+                    MPI_CMD+=" -x UCX_DC_TM_ENABLE=0"
+                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=0"
+                elif [[ "${TM_OPT}" == 1 ]]; then
+                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
+                else
+                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
+                    MPI_CMD+=" -x ${TM_OPT}"
+                fi
+
+            fi
+
         fi
 
-    elif [[ "${MPI}" == "impi" ]]; then
-
-        # Default options
-        MPI_CMD+=" -genv I_MPI_DEBUG 4"
-        MPI_CMD+=" -genv I_MPI_FALLBACK 0"
-
-        # FABRICS
-        MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
-        if [[ "${MODE}" == "dapl" ]]; then
-            MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
-            MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
-        elif [[ "${MODE}" == "ofa" ]]; then
-            MPI_CMD+=" -genv I_MPI_OFA_ADAPTER_NAME ${DEVICE}"
-        fi
     fi
 
-#    # TODO: need to loop through MODE_OPTS, MPI_OPTS, KNEM_OPTS, HCOLL_OPTS, etc.
-#    # Map specific MODE options and loop through it 
-#    local MODE_OPTS=($(LtoU ${MODE})_OPTS[@])
-#
-#    if [[ ${#MODE_OPTS[@]} != 0 ]]; then
-#
-#        local MODE_OPT=""
-#
-#        for MODE_OPT in ${MODE_OPTS[@]}; do
-#
-#            Debug "MODE_OPT=${MODE_OPT}"
-#
-#            MPI_CMD+=" ${MODE_OPT}"
-#
-            # Remaining options
-            if [[ -n "${MPI_OPTS}" ]]; then
-                MPI_CMD+=" ${MPI_OPTS}"
-            fi
+    # Remaining options
+    if [[ -n "${MPI_OPTS}" ]]; then
+        MPI_CMD+=" ${MPI_OPTS}"
+    fi
 
-            # APP
-            MPI_CMD+=" ${EXECUTABLE}"
-            if [[ -n "${INPUT}" ]]; then
-                MPI_CMD+=" ${INPUT}"
-            fi
+    # Application
+    MPI_CMD+=" ${EXECUTABLE}"
+    if [[ -n "${INPUT}" ]]; then
+        MPI_CMD+=" ${INPUT}"
+    fi
+
+    read -r -d '' TMP <<- EOS
+echo "MPIRUN_CMD=${MPI_CMD}"
+echo
+echo
+
+echo Job started at \`date "+%F %T"\`
+time ${MPI_CMD}
+echo Job ended at \`date "+%F %T"\`
+EOS
+
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
+}
+
+
+# Build IMPI job script
+function BuildJobIMPI () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    # Variable to store job script
+    local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}
+    local JOB_SCRIPT=""
+
+    # Build common part for the job script
+    BuildJobCommon
+
+    # Build MPIRUN command line for the job script
+    BuildJobIMPI_MPI_CMD
+
+    # Create workdir for the job
+    mkdir -p "${JOB}"
+    Debug "Created directory \"${JOB}\""
+    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
+    Info "Built \"${JOB}\""
+
+    # Show job script
+    ShowJob
+
+    # Stage job
+    StageJob
+
+    # Submit job
+    SubmitJob
+}
+
+
+# Build IMPI mpirun command line
+function BuildJobIMPI_MPI_CMD () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    local TMP=""
+    local MPI_CMD="${MPIRUN}"
+
+    # IMPI default options
+    MPI_CMD+=" -genv I_MPI_DEBUG 4"
+    MPI_CMD+=" -genv I_MPI_FALLBACK 0"
+
+    # FABRICS
+    MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
+    if [[ "${MODE}" == "dapl" ]]; then
+        MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
+        MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
+    elif [[ "${MODE}" == "ofa" ]]; then
+        MPI_CMD+=" -genv I_MPI_OFA_ADAPTER_NAME ${DEVICE}"
+    fi
+
+    # Remaining options
+    if [[ -n "${MPI_OPTS}" ]]; then
+        MPI_CMD+=" ${MPI_OPTS}"
+    fi
+
+    # Application
+    MPI_CMD+=" ${EXECUTABLE}"
+    if [[ -n "${INPUT}" ]]; then
+        MPI_CMD+=" ${INPUT}"
+    fi
+
+    read -r -d '' TMP <<- EOS
+echo "MPIRUN_CMD=${MPI_CMD}"
+echo
+echo
+
+echo Job started at \`date "+%F %T"\`
+time ${MPI_CMD}
+echo Job ended at \`date "+%F %T"\`
+EOS
+
+    JOB_SCRIPT+=$'\n'
+    JOB_SCRIPT+="${TMP}"
 }
 
 
@@ -606,27 +712,12 @@ function BuildJob () {
                                         continue
                                     fi
 
-                                    for TL in ${TLS[@]}; do
-
-                                        Debug "TL=${TL}"
-
-                                        local TEMP="VAL_$(LtoU ${MODE})_TLS[@]"
-                                        if ! IsValid "${TL}" "${!TEMP}"; then
-                                            Verbose "\"${TL}\" is not a valid TL for ${MODE}, pass"
-                                            continue
-                                        fi
-
-                                        # Variable to store job script
-                                        local JOB="${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T".${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}
-                                        local JOB_SCRIPT=""
-
-                                        # Build common part of job script
-                                        BuildJobCommon
-
-                                        # Loop through all MPI option combinations
-                                        BuildJobMPI
-
-                                    done # TL
+                                    # Branch based on MPI flavor
+                                    if [[ $MPI == "hpcx" ]]; then
+                                        BuildJobHPCX
+                                    elif [[ $MPI == "impi" ]]; then
+                                        BuildJobIMPI
+                                    fi
 
                                 done # MODE
 
@@ -713,17 +804,18 @@ function Usage () {
     echo "     --map-by         OMPI --map-by option"
     echo "     --rank-by        OMPI --rank-by option"
     echo "     --bind-to        OMPI --bind-to option"
-    echo "     --tls            TLs (openib, dc, rc, ud, dc_x, rc_x, ud_x, impi, ...) (impi for impi)"
+    echo "     --tls            TLs (openib, dc, rc, ud, dc_x, rc_x, ud_x"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
+    echo "     --tm             TM options"
 }
 
 
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bin:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exe:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,usage::,verbose \
+    -l app:,app_ver:,bin:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exe:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,tm::,usage::,verbose \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -848,7 +940,7 @@ while true do OPT; do
                     shift 2
                     ;;
                 *)
-                    ENV_VARS="${2//,/ }"
+                    ENV_VARS=("${2//,/ }")
                     Debug "ENV_VARS=(${ENV_VARS[@]})"
                     shift 2
                     ;;
@@ -857,15 +949,15 @@ while true do OPT; do
         --hcoll)
             case "$2" in
                 "")
-                    HCOLL=1
+                    HCOLL_OPTS=(1)
                     shift 2
                     ;;
                 *)
-                    HCOLL="$2"
+                    HCOLL_OPTS=("${2//,/ }")
                     shift 2
                     ;;
             esac
-            Debug "HCOLL=${HCOLL}"
+            Debug "HCOLL_OPTS=(${HCOLL_OPTS[@]})"
             ;;
         -h|--help|--usage)
             case "$2" in
@@ -887,6 +979,7 @@ while true do OPT; do
                     ;;
                 ompi|hpcx)
                     ompi_info -a
+                    mpirun --help
                     shift 2
                     ;;
                 sharp)
@@ -915,15 +1008,15 @@ while true do OPT; do
         --knem)
             case "$2" in
                 "")
-                    KNEM=1
+                    KNEM_OPTS=(1)
                     shift 2
                     ;;
                 *)
-                    KNEM="$2"
+                    KNEM_OPTS=("${2//,/ }")
                     shift 2
                     ;;
             esac
-            Debug "KNEM=${KNEM}"
+            Debug "KNEM_OPTS=(${KNEM_OPTS[@]})"
             ;;
         --map-by)
             case "$2" in
@@ -1072,15 +1165,15 @@ while true do OPT; do
         --sharp)
             case "$2" in
                 "")
-                    SHARP=1
+                    SHARP_OPTS=(1)
                     shift 2
                     ;;
                 *)
-                    SHARP="$2"
+                    SHARP=("${2//,/ }")
                     shift 2
                     ;;
             esac
-            Debug "SHARP=${SHARP}"
+            Debug "SHARP_OPTS=(${SHARP_OPTS[@]})"
             ;;
         --slurm_opts)
             case "$2" in
@@ -1141,6 +1234,19 @@ while true do OPT; do
                     shift 2
                     ;;
             esac
+            ;;
+        --tm)
+            case "$2" in
+                "")
+                    TM_OPTS=(1)
+                    shift 2
+                    ;;
+                *)
+                    TM_OPTS=("${2//,/ }")
+                    shift 2
+                    ;;
+            esac
+            Debug "TM_OPTS=(${TM_OPTS[@]})"
             ;;
         -v|--verbose)
             VERBOSE=1
