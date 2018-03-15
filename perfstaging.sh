@@ -417,12 +417,45 @@ function BuildJobHPCX () {
 
                 Debug "KNEM_OPT=${KNEM_OPT}"
 
-                for TM_OPT in ${TM_OPTS[@]}; do
+                # PML is UCX and Transport is TM capable
+                if [ "${MODE}" == "ucx" ] && [[ "${TL}" == "rc" || "${TL}" == "rc_x" || "${TL}" == "dc" || "${TL}" == "dc_x" ]]; then
 
-                    Debug "TM_OPT=${TM_OPT}"
+                    for TM_OPT in ${TM_OPTS[@]}; do
+
+                        Debug "TM_OPT=${TM_OPT}"
+
+                        # Variable to store job script
+                        local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                        local JOB_SCRIPT=""
+
+                        # Build common part for the job script
+                        BuildJobCommon
+
+                        # Build MPIRUN command line for the job script
+                        BuildJobHPCX_MPI_CMD
+
+                        # Create workdir for the job
+                        mkdir -p "${JOB}"
+                        Debug "Created directory \"${JOB}\""
+                        echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
+                        Info "Built \"${JOB}\""
+
+                        # Show job script
+                        ShowJob
+
+                        # Stage job
+                        StageJob
+
+                        # Submit job
+                        SubmitJob
+
+                    done # TM_OPT
+
+                # PML is not UCX, or is UCX but using OOB or UD/UD_X Transport
+                else
 
                     # Variable to store job script
-                    local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                    local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
                     local JOB_SCRIPT=""
 
                     # Build common part for the job script
@@ -446,7 +479,7 @@ function BuildJobHPCX () {
                     # Submit job
                     SubmitJob
 
-                done # TM_OPT
+                fi
 
             done # KNEM_OPT
 
@@ -511,7 +544,7 @@ function BuildJobHPCX_MPI_CMD () {
         # TM
         if [[ "${MODE}" == "ucx" ]]; then
 
-            if [[ "${TL}" != "ud" || "${TL}" != "ud_x" ]]; then
+            if [[ "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
 
                 if [[ "${TM_OPT}" == 0 ]]; then
                     MPI_CMD+=" -x UCX_DC_TM_ENABLE=0"
