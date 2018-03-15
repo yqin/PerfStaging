@@ -372,23 +372,6 @@ EOS
 }
 
 
-# Run staging script before job submission
-function StageJob () {
-    Debug "Calling ${FUNCNAME[0]}($@)"
-
-    # Perform staging process to prepare the job
-    if [[ -n "${SLURM_STAGE}" ]]; then
-        local CURRENT_DIR="${PWD}"
-        cd "${JOB}"
-        Debug "Running staging script from \"${JOB}\""
-        local RETURN=$(eval "${SLURM_STAGE}")
-        Debug "Staging script returned ($?): \"${RETURN}\""
-        cd "${CURRENT_DIR}"
-        Verbose "Staging script for \"${JOB}\" was run"
-    fi
-}
-
-
 # Build HPCX job script
 function BuildJobHPCX () {
     Debug "Calling ${FUNCNAME[0]}($@)"
@@ -418,7 +401,7 @@ function BuildJobHPCX () {
                 Debug "KNEM_OPT=${KNEM_OPT}"
 
                 # PML is UCX and Transport is TM capable
-                if [ "${MODE}" == "ucx" ] && [[ "${TL}" == "rc" || "${TL}" == "rc_x" || "${TL}" == "dc" || "${TL}" == "dc_x" ]]; then
+                if [[ "${MODE}" == "ucx" && "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
 
                     for TM_OPT in ${TM_OPTS[@]}; do
 
@@ -434,17 +417,11 @@ function BuildJobHPCX () {
                         # Build MPIRUN command line for the job script
                         BuildJobHPCX_MPI_CMD
 
-                        # Create workdir for the job
-                        mkdir -p "${JOB}"
-                        Debug "Created directory \"${JOB}\""
-                        echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
-                        Info "Built \"${JOB}\""
+                        # Stage job
+                        StageJob
 
                         # Show job script
                         ShowJob
-
-                        # Stage job
-                        StageJob
 
                         # Submit job
                         SubmitJob
@@ -464,17 +441,11 @@ function BuildJobHPCX () {
                     # Build MPIRUN command line for the job script
                     BuildJobHPCX_MPI_CMD
 
-                    # Create workdir for the job
-                    mkdir -p "${JOB}"
-                    Debug "Created directory \"${JOB}\""
-                    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
-                    Info "Built \"${JOB}\""
+                    # Stage job
+                    StageJob
 
                     # Show job script
                     ShowJob
-
-                    # Stage job
-                    StageJob
 
                     # Submit job
                     SubmitJob
@@ -513,51 +484,51 @@ function BuildJobHPCX_MPI_CMD () {
             MPI_CMD+=" -mca btl ${TL},vader,self"
         elif [[ "${MODE}" == "ucx" ]]; then
             MPI_CMD+=" -x UCX_TLS=${TL},shm,self"
-            MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
         elif [[ "${MODE}" == "yalla" ]]; then
             MPI_CMD+=" -x MXM_TLS=${TL},shm,self"
-            MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
         fi
 
-        MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
+    fi
 
-        # HCOLL
-        MPI_CMD+=" -mca coll_fca_enable 0"
-        if [[ "${HCOLL_OPT}" == 0 ]]; then
-            MPI_CMD+=" -mca coll_hcoll_enable 0"
-        elif [[ "${HCOLL_OPT}" == 1 ]]; then
-            MPI_CMD+=" -mca coll_hcoll_enable 1"
-            MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
+    if [[ "${MODE}" == "ucx" ]]; then
+        MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
+    elif [[ "${MODE}" == "yalla" ]]; then
+        MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
+    fi
+
+    MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
+
+    # HCOLL
+    MPI_CMD+=" -mca coll_fca_enable 0"
+    if [[ "${HCOLL_OPT}" == 0 ]]; then
+        MPI_CMD+=" -mca coll_hcoll_enable 0"
+    elif [[ "${HCOLL_OPT}" == 1 ]]; then
+        MPI_CMD+=" -mca coll_hcoll_enable 1"
+        MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
+    else
+        MPI_CMD+=" -mca coll_hcoll_enable 1"
+        MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
+        MPI_CMD+=" -x ${HCOLL_OPT}"
+    fi
+
+    # KNEM
+    if [[ "${KNEM_OPT}" == 0 ]]; then
+        MPI_CMD+=" -mca btl_sm_use_knem 0"
+    else
+        MPI_CMD+=" -mca btl_sm_use_knem 1"
+    fi
+
+    # TM
+    if [[ "${MODE}" == "ucx" && "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
+
+        if [[ "${TM_OPT}" == 0 ]]; then
+            MPI_CMD+=" -x UCX_DC_TM_ENABLE=0"
+            MPI_CMD+=" -x UCX_RC_TM_ENABLE=0"
+        elif [[ "${TM_OPT}" == 1 ]]; then
+            MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
         else
-            MPI_CMD+=" -mca coll_hcoll_enable 1"
-            MPI_CMD+=" -x HCOLL_MAIN_IB=${DEVICE}:${PORT}"
-            MPI_CMD+=" -x ${HCOLL_OPT}"
-        fi
-
-        # KNEM
-        if [[ "${KNEM_OPT}" == 0 ]]; then
-            MPI_CMD+=" -mca btl_sm_use_knem 0"
-        else
-            MPI_CMD+=" -mca btl_sm_use_knem 1"
-        fi
-
-        # TM
-        if [[ "${MODE}" == "ucx" ]]; then
-
-            if [[ "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
-
-                if [[ "${TM_OPT}" == 0 ]]; then
-                    MPI_CMD+=" -x UCX_DC_TM_ENABLE=0"
-                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=0"
-                elif [[ "${TM_OPT}" == 1 ]]; then
-                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
-                else
-                    MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
-                    MPI_CMD+=" -x ${TM_OPT}"
-                fi
-
-            fi
-
+            MPI_CMD+=" -x UCX_RC_TM_ENABLE=1"
+            MPI_CMD+=" -x ${TM_OPT}"
         fi
 
     fi
@@ -602,17 +573,11 @@ function BuildJobIMPI () {
     # Build MPIRUN command line for the job script
     BuildJobIMPI_MPI_CMD
 
-    # Create workdir for the job
-    mkdir -p "${JOB}"
-    Debug "Created directory \"${JOB}\""
-    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
-    Info "Built \"${JOB}\""
+    # Stage job
+    StageJob
 
     # Show job script
     ShowJob
-
-    # Stage job
-    StageJob
 
     # Submit job
     SubmitJob
@@ -767,6 +732,30 @@ function BuildJob () {
         done # PPN
 
     done # NODE
+}
+
+
+# Run staging script before job submission
+function StageJob () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    # Create workdir for the job
+    mkdir -p "${JOB}"
+    Debug "Created directory \"${JOB}\""
+    echo "${JOB_SCRIPT}" > "${JOB}/${JOB}.sh"
+    Info "Built \"${JOB}\""
+
+    # Perform staging process to prepare the job
+    if [[ -n "${SLURM_STAGE}" ]]; then
+        local CURRENT_DIR="${PWD}"
+
+        cd "${JOB}"
+        Debug "Running staging script from \"${JOB}\""
+        local RETURN=$(eval "${SLURM_STAGE}")
+        Debug "Staging script returned ($?): \"${RETURN}\""
+        cd "${CURRENT_DIR}"
+        Verbose "Staging script for \"${JOB}\" was run"
+    fi
 }
 
 
