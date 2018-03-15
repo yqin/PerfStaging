@@ -15,7 +15,7 @@ EINTEGER=2
 # Valid options
 # Compilers
 VAL_COMPILERS=("gcc" "intel")
-VAL_GNU_VERS=("4.8.5")
+VAL_GCC_VERS=("4.8.5")
 VAL_INTEL_VERS=("2018.1.163")
 
 # MPIs
@@ -24,10 +24,11 @@ VAL_HPCX_VERS=("2.0.0" "2.1.0")
 VAL_IMPI_VERS=("2018.1.163")
 
 # MODES (PML or FABRIC)
-VAL_HPCX_MODES=("ob1" "ucx" "yalla")
-VAL_IMPI_MODES=("shm" "dapl" "tcp" "tmi" "ofa" "ofi")
+VAL_HPCX_MODES=("oob" "ob1" "ucx" "yalla")
+VAL_IMPI_MODES=("oob" "shm" "dapl" "tcp" "tmi" "ofa" "ofi")
 
 # TLS
+VAL_OOB_TLS=("oob")
 VAL_OB1_TLS=("oob" "openib")
 VAL_UCX_TLS=("oob" "dc" "rc" "ud" "dc_x" "rc_x" "ud_x")
 VAL_YALLA_TLS=("oob" "dc" "rc" "ud")
@@ -69,13 +70,13 @@ COMPILER_VERS=(${COMPILER_VERS[@]:-"2018.1.163"})
 
 MPIS=(${MPIS[@]:-"hpcx"})
 MPI_VERS=(${MPI_VERS[@]:-"2.1.0"})
+MPIRUN=${MPIRUN:-"mpirun"}
 # TODO: make it array?
 MPI_OPTS=${MPI_OPTS:-""}
 MAP_BY=${MAP_BY:-"socket"}
 RANK_BY=${RANK_BY:-"core"}
 BIND_TO=${BIND_TO:-"core"}
-MODES=(${MODES[@]:-"ucx"})
-MPIRUN=${MPIRUN:-"mpirun"}
+MODES=(${MODES[@]:-"oob"})
 TLS=(${TLS[@]:-"oob"})
 
 #MXM_OPTS=${MXM_OPTS:-""}
@@ -476,8 +477,22 @@ function BuildJobHPCX_MPI_CMD () {
     MPI_CMD+=" --bind-to ${BIND_TO}"
 
     # PML
-    MPI_CMD+=" -mca pml ${MODE}"
+    if [[ "${MODE}" != "oob" ]]; then
+        MPI_CMD+=" -mca pml ${MODE}"
+    fi
 
+    if [[ "${MODE}" == "ob1" ]]; then
+        MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
+    elif [[ "${MODE}" == "ucx" ]]; then
+        MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
+    elif [[ "${MODE}" == "yalla" ]]; then
+        MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
+    fi
+
+    # You might need to do the following for yalla and ucx as well.
+    #MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
+
+    # Transport
     if [[ "${TL}" != "oob" ]]; then
 
         if [[ "${MODE}" == "ob1" ]]; then
@@ -489,14 +504,6 @@ function BuildJobHPCX_MPI_CMD () {
         fi
 
     fi
-
-    if [[ "${MODE}" == "ucx" ]]; then
-        MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
-    elif [[ "${MODE}" == "yalla" ]]; then
-        MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
-    fi
-
-    MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
 
     # HCOLL
     MPI_CMD+=" -mca coll_fca_enable 0"
@@ -596,7 +603,10 @@ function BuildJobIMPI_MPI_CMD () {
     MPI_CMD+=" -genv I_MPI_FALLBACK 0"
 
     # FABRICS
-    MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
+    if [[ "${MODE}" != "oob" ]]; then
+        MPI_CMD+=" -genv I_MPI_FABRICS shm:${MODE}"
+    fi
+
     if [[ "${MODE}" == "dapl" ]]; then
         MPI_CMD+=" -genv I_MPI_DAPL_UD 0"
         MPI_CMD+=" -genv I_MPI_DAPL_PROVIDER ofa-v2-${DEVICE}-${PORT}u"
@@ -814,19 +824,19 @@ function Usage () {
     echo "  -p,--port           Port"
     echo
     echo "  Compiler options:"
-    echo "  -c,--compilers      Compilers (gcc, intel, ...)"
+    echo "  -c,--compilers      Compilers (gcc, intel)"
     echo "     --compiler_vers  Compiler versions"
     echo
     echo "  MPI options:"
-    echo "  -m,--mpis           MPIs (hpcx, impi, ...)"
+    echo "  -m,--mpis           MPIs (hpcx, impi)"
     echo "     --mpi_vers       MPI versions"
     echo "     --mpirun         Redefine MPIRUN launcher (mpirun, oshrun, upcrun, ...)"
     echo "     --mpi_opts       Extra MPI options"
-    echo "     --modes          Modes for MPI (pml or fabric, e.g., ob1, ucx, yalla, dapl, ofa, ...)"
+    echo "     --modes          Modes for MPI (pml or fabric, e.g., oob, ob1, ucx, yalla, dapl, ofa, ...)"
     echo "     --map-by         OMPI --map-by option"
     echo "     --rank-by        OMPI --rank-by option"
     echo "     --bind-to        OMPI --bind-to option"
-    echo "     --tls            TLs (openib, dc, rc, ud, dc_x, rc_x, ud_x"
+    echo "     --tls            TLs (oob, openib, dc, rc, ud, dc_x, rc_x, ud_x)"
     echo "     --hcoll          HCOLL options"
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
