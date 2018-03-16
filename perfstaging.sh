@@ -81,7 +81,10 @@ TLS=(${TLS[@]:-"oob"})
 
 # PML/FABRIC specific options
 # If they are taken from command line options they will be broken into single ones.
-# TODO: Need to have better handling.
+# TODO: Need to have better handling. One idea is to use a different delimiter so
+#       we can break element boundary and different options within the same element.
+#       Another one is to pass the options in from environment variables. This way
+#       array elements can be better handled.
 UCX_OPTS=(${UCX_OPTS:-})
 YALLA_OPTS=(${YALLA_OPTS:-})
 #DAPL_OPTS=(${DAPL_OPTS:-})
