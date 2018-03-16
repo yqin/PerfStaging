@@ -79,13 +79,15 @@ BIND_TO=${BIND_TO:-"core"}
 MODES=(${MODES[@]:-"oob"})
 TLS=(${TLS[@]:-"oob"})
 
-#MXM_OPTS=${MXM_OPTS:-""}
-#UCX_OPTS=${UCX_OPTS:-""}
-#YALLA_OPTS=${YALLA_OPTS:-""}
-#DAPL_OPTS=${DAPL_OPTS:-""}
-#TMI_OPTS=${TMI_OPTS:-""}
-#OFA_OPTS=${OFA_OPTS:-""}
-#OFI_OPTS=${OFI_OPTS:-""}
+# PML/FABRIC specific options
+# If they are taken from command line options they will be broken into single ones.
+# TODO: Need to have better handling.
+UCX_OPTS=(${UCX_OPTS:-})
+YALLA_OPTS=(${YALLA_OPTS:-})
+#DAPL_OPTS=(${DAPL_OPTS:-})
+#TMI_OPTS=(${TMI_OPTS:-""})
+#OFA_OPTS=(${OFA_OPTS:-""})
+#OFI_OPTS=(${OFI_OPTS:-""})
 
 HCOLL_OPTS=(${HCOLL_OPTS:-"0"})
 KNEM_OPTS=(${KNEM_OPTS:-"0"})
@@ -291,6 +293,48 @@ function BuildJobCommon () {
 }
 
 
+# Streamline building, staging and submitting HPCX job script
+function BuildJobCommonHPCX () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    # Build common part for the job script
+    BuildJobCommon
+
+    # Build MPIRUN command line for the job script
+    BuildJobHPCX_MPI_CMD
+
+    # Stage job
+    StageJob
+
+    # Show job script
+    ShowJob
+
+    # Submit job
+    SubmitJob
+}
+
+
+# Streamline building, staging and submitting IMPI job script
+function BuildJobCommonIMPI () {
+    Debug "Calling ${FUNCNAME[0]}($@)"
+
+    # Build common part for the job script
+    BuildJobCommon
+
+    # Build MPIRUN command line for the job script
+    BuildJobIMPI_MPI_CMD
+
+    # Stage job
+    StageJob
+
+    # Show job script
+    ShowJob
+
+    # Submit job
+    SubmitJob
+}
+
+
 # Prepare job script header
 function BuildJobHeader () {
     Debug "Calling ${FUNCNAME[0]}($@)"
@@ -378,6 +422,8 @@ function BuildJobHPCX () {
     Debug "Calling ${FUNCNAME[0]}($@)"
 
     local TL=""
+    local YALLA_OPT=""
+    local UCX_OPT=""
     local HCOLL_OPT=""
     local KNEM_OPT=""
     local SHARP_OPT=""
@@ -401,55 +447,118 @@ function BuildJobHPCX () {
 
                 Debug "KNEM_OPT=${KNEM_OPT}"
 
-                # PML is UCX and Transport is TM capable
-                if [[ "${MODE}" == "ucx" && "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
+                # UCX
+                if [[ "${MODE}" == "ucx" ]]; then
 
-                    for TM_OPT in ${TM_OPTS[@]}; do
+                    # Empty ucx options
+                    if [[ ${#UCX_OPTS[@]} == 0 ]]; then
 
-                        Debug "TM_OPT=${TM_OPT}"
+                        # Transport is TM capable, loop through TM options
+                        if [[ "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
+
+                            for TM_OPT in ${TM_OPTS[@]}; do
+
+                                Debug "TM_OPT=${TM_OPT}"
+
+                                # Variable to store job script
+                                local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                                local JOB_SCRIPT=""
+
+                                # Streamline the rest of process
+                                BuildJobCommonHPCX
+
+                            done # TM_OPT
+
+                        # Not TM capable
+                        else
+
+                            # Variable to store job script
+                            local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
+                            local JOB_SCRIPT=""
+
+                            # Streamline the rest of process
+                            BuildJobCommonHPCX
+
+                        fi
+
+                    else
+
+                        # Loop through all UCX_OPTS
+                        for UCX_OPT in ${UCX_OPTS[@]}; do
+
+                            Debug "UCX_OPT=${UCX_OPT}"
+
+                            # Transport is TM capable, loop through TM options
+                            if [[ "${TL}" != "ud" && "${TL}" != "ud_x" ]]; then
+
+                                for TM_OPT in ${TM_OPTS[@]}; do
+
+                                    Debug "TM_OPT=${TM_OPT}"
+
+                                    # Variable to store job script
+                                    local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.${UCX_OPT}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                                    local JOB_SCRIPT=""
+
+                                    # Streamline the rest of process
+                                    BuildJobCommonHPCX
+
+                                done # TM_OPT
+
+                            # Not TM capable
+                            else
+
+                                # Variable to store job script
+                                local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.${UCX_OPT}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
+                                local JOB_SCRIPT=""
+
+                                # Streamline the rest of process
+                                BuildJobCommonHPCX
+
+                            fi
+
+                        done # UCX_OPT
+
+                    fi
+
+                # YALLA
+                elif [[ "${MODE}" == "yalla" ]]; then
+
+                    # Empty yalla options
+                    if [[ ${#YALLA_OPTS[@]} == 0 ]]; then
 
                         # Variable to store job script
-                        local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}.tm=${TM_OPT}
+                        local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
                         local JOB_SCRIPT=""
 
-                        # Build common part for the job script
-                        BuildJobCommon
+                        # Streamline the rest of process
+                        BuildJobCommonHPCX
 
-                        # Build MPIRUN command line for the job script
-                        BuildJobHPCX_MPI_CMD
+                    else
 
-                        # Stage job
-                        StageJob
+                        # Loop through all YALLA_OPTS
+                        for YALLA_OPT in ${YALLA_OPTS[@]}; do
 
-                        # Show job script
-                        ShowJob
+                            Debug "YALLA_OPT=${YALLA_OPT}"
 
-                        # Submit job
-                        SubmitJob
+                            # Variable to store job script
+                            local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.${YALLA_OPT}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
+                            local JOB_SCRIPT=""
 
-                    done # TM_OPT
+                            # Streamline the rest of process
+                            BuildJobCommonHPCX
 
-                # PML is not UCX, or is UCX but using OOB or UD/UD_X Transport
-                else
+                        done # YALLA_OPT
+
+                    fi
+
+                elif [[ "${MODE}" == "oob" ]]; then
 
                     # Variable to store job script
                     local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}.${TL}.hcoll=${HCOLL_OPT}.knem=${KNEM_OPT}
                     local JOB_SCRIPT=""
 
-                    # Build common part for the job script
-                    BuildJobCommon
-
-                    # Build MPIRUN command line for the job script
-                    BuildJobHPCX_MPI_CMD
-
-                    # Stage job
-                    StageJob
-
-                    # Show job script
-                    ShowJob
-
-                    # Submit job
-                    SubmitJob
+                    # Streamline the rest of process
+                    BuildJobCommonHPCX
 
                 fi
 
@@ -485,8 +594,14 @@ function BuildJobHPCX_MPI_CMD () {
         MPI_CMD+=" -mca btl_openib_if_include ${DEVICE}:${PORT}"
     elif [[ "${MODE}" == "ucx" ]]; then
         MPI_CMD+=" -x UCX_NET_DEVICES=${DEVICE}:${PORT}"
+        if [[ -n ${UCX_OPT} ]]; then
+            MPI_CMD+=" -x ${UCX_OPT}"
+        fi
     elif [[ "${MODE}" == "yalla" ]]; then
         MPI_CMD+=" -x MXM_RDMA_PORTS=${DEVICE}:${PORT}"
+        if [[ -n ${YALLA_OPT} ]]; then
+            MPI_CMD+=" -x ${YALLA_OPT}"
+        fi
     fi
 
     # You might need to do the following for yalla and ucx as well.
@@ -574,20 +689,8 @@ function BuildJobIMPI () {
     local JOB=${APP}-${APP_VER}-${EXECUTABLE}.${CLUSTER}.${DEVICE}.$(printf "%03d" ${NODE})N.$(printf "%02d" ${PPN})P.$(printf "%02d" ${THREAD})T.${COMPILER}-${COMPILER_VER}.${MPI}-${MPI_VER}.${MODE}
     local JOB_SCRIPT=""
 
-    # Build common part for the job script
-    BuildJobCommon
-
-    # Build MPIRUN command line for the job script
-    BuildJobIMPI_MPI_CMD
-
-    # Stage job
-    StageJob
-
-    # Show job script
-    ShowJob
-
-    # Submit job
-    SubmitJob
+    # Streamline the rest of process
+    BuildJobCommonIMPI
 }
 
 
@@ -791,6 +894,7 @@ function SubmitJob () {
 }
 
 
+# Usage
 function Usage () {
     echo "Usage: $0 [options]"
     echo
@@ -841,13 +945,15 @@ function Usage () {
     echo "     --knem           KNEM options"
     echo "     --sharp          SHARP options"
     echo "     --tm             TM options"
+    echo "     --ucx            UCX options"
+    echo "     --mxm,yalla      MXM/YALLA options"
 }
 
 
 # Retrieve command line options
 CMD_OPTS=`getopt \
     -o a:b:c:Dd:e:h::i:m:n:p:v \
-    -l app:,app_ver:,bin:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exe:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,tm::,usage::,verbose \
+    -l app:,app_ver:,bin:,bind-to:,cluster:,compilers:,compiler_vers:,debug,device:,env:,exe:,hcoll::,help::,input:,knem::,map-by:,modes:,modules:,mpirun:,mpis:,mpi_vers:,mpi_opts:,mxm:,nodes:,port:,ppn:,pxt:,rank-by:,sharp::,slurm_opts:,slurm_stage:,slurm_time:,threads:,tls:,tm::,ucx:,usage::,verbose,yalla: \
     -n "$0" -- "$@"`
 
 if [[ $? != 0 ]]; then
@@ -1134,6 +1240,18 @@ while true do OPT; do
                     ;;
             esac
             ;;
+        --mxm|--yalla)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    YALLA_OPTS=("${2//,/ }")
+                    Debug "YALLA_OPTS=(${YALLA_OPTS[@]})"
+                    shift 2
+                    ;;
+            esac
+            ;;
         -n|--nodes)
             case "$2" in
                 "")
@@ -1279,6 +1397,18 @@ while true do OPT; do
                     ;;
             esac
             Debug "TM_OPTS=(${TM_OPTS[@]})"
+            ;;
+        --ucx)
+            case "$2" in
+                "")
+                    shift 2
+                    ;;
+                *)
+                    UCX_OPTS=("${2//,/ }")
+                    Debug "UCX_OPTS=(${UCX_OPTS[@]})"
+                    shift 2
+                    ;;
+            esac
             ;;
         -v|--verbose)
             VERBOSE=1
